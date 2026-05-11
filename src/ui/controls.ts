@@ -1,4 +1,5 @@
 import type { TuningPreset } from "../domain/instrument";
+import type { RenderString } from "./scene";
 
 function presetGlyph(preset: TuningPreset): HTMLSpanElement {
   const baseMidi = preset.strings[0]?.midi ?? 0;
@@ -27,6 +28,7 @@ export interface ControlsHandle {
   root: HTMLDivElement;
   setPulse(active: boolean): void;
   setActivePreset(presetId: string): void;
+  setStringLabels(strings: readonly RenderString[]): void;
 }
 
 export function createControls(options: ControlsOptions): ControlsHandle {
@@ -36,6 +38,10 @@ export function createControls(options: ControlsOptions): ControlsHandle {
   const brand = document.createElement("div");
   brand.className = "brand-mark";
   brand.setAttribute("aria-hidden", "true");
+
+  const labelRail = document.createElement("div");
+  labelRail.className = "string-labels";
+  const labels = new Map<string, HTMLSpanElement>();
 
   const toggle = document.createElement("button");
   toggle.type = "button";
@@ -74,7 +80,36 @@ export function createControls(options: ControlsOptions): ControlsHandle {
     }
   });
 
-  root.append(brand, toggle, panel);
+  root.append(labelRail, brand, toggle, panel);
+
+  const syncLabelRail = (strings: readonly RenderString[]): void => {
+    const nextIds = strings.map((stringState) => stringState.id);
+    const currentIds = Array.from(labels.keys());
+    const needsRebuild =
+      nextIds.length !== currentIds.length || nextIds.some((id, index) => id !== currentIds[index]);
+
+    if (needsRebuild) {
+      labelRail.replaceChildren();
+      labels.clear();
+      strings.forEach((stringState) => {
+        const label = document.createElement("span");
+        label.className = "string-label";
+        label.textContent = stringState.label;
+        labelRail.appendChild(label);
+        labels.set(stringState.id, label);
+      });
+    }
+
+    strings.forEach((stringState) => {
+      const label = labels.get(stringState.id);
+      if (!label) return;
+      label.textContent = stringState.label;
+      if (stringState.active) label.dataset.active = "1";
+      else delete label.dataset.active;
+      if (stringState.locked) label.dataset.locked = "1";
+      else delete label.dataset.locked;
+    });
+  };
 
   return {
     root,
@@ -87,6 +122,9 @@ export function createControls(options: ControlsOptions): ControlsHandle {
         if (id === presetId) button.dataset.active = "1";
         else delete button.dataset.active;
       });
+    },
+    setStringLabels(strings) {
+      syncLabelRail(strings);
     },
   };
 }

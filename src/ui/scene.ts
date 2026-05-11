@@ -3,6 +3,7 @@ import type { TuningPreset } from "../domain/instrument";
 
 export interface RenderString {
   id: string;
+  label: string;
   active: boolean;
   locked: boolean;
   amplitude: number;
@@ -21,6 +22,11 @@ export function computeStringXs(width: number, count: number): number[] {
   const padding = width * 0.16;
   const usable = width - padding * 2;
   return Array.from({ length: count }, (_, index) => padding + (usable * index) / (count - 1));
+}
+
+function displayLabel(noteId: string): string {
+  const match = noteId.match(/[A-G]/i);
+  return match ? match[0].toUpperCase() : noteId.slice(0, 1).toUpperCase();
 }
 
 export function buildRenderState(
@@ -42,6 +48,7 @@ export function buildRenderState(
       const stringState = state.strings[stringDef.id];
       return {
         id: stringDef.id,
+        label: displayLabel(stringDef.id),
         active: state.activeStringId === stringDef.id,
         locked: stringState.lockedInThisSession,
         amplitude: stringState.amplitude,

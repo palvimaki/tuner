@@ -63,6 +63,15 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
       state = resetForPreset(preset);
       controls.setActivePreset(presetId);
       controls.setPulse(false);
+      const renderState = buildRenderState(
+        state,
+        preset,
+        !fallback.hidden,
+        !hasOpenedControls(),
+        performance.now(),
+      );
+      controls.setStringLabels(renderState.strings);
+      renderer.setState(renderState);
       if (engine) engine.setTargets(targetsForPreset(preset));
     },
   });
@@ -82,9 +91,9 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     if (effects.completed) {
       engine.playCompletionStrum(preset);
     }
-    renderer.setState(
-      buildRenderState(state, preset, !fallback.hidden, !hasOpenedControls(), nowMs),
-    );
+    const renderState = buildRenderState(state, preset, !fallback.hidden, !hasOpenedControls(), nowMs);
+    controls.setStringLabels(renderState.strings);
+    renderer.setState(renderState);
   });
 
   const startAudio = async (): Promise<void> => {
@@ -138,5 +147,13 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     void engine.resume().then(() => requestWakeLock());
   });
 
-  renderer.setState(buildRenderState(state, preset, false, !hasOpenedControls(), performance.now()));
+  const initialRenderState = buildRenderState(
+    state,
+    preset,
+    false,
+    !hasOpenedControls(),
+    performance.now(),
+  );
+  controls.setStringLabels(initialRenderState.strings);
+  renderer.setState(initialRenderState);
 }

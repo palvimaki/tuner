@@ -58,6 +58,38 @@ button {
   pointer-events: auto;
 }
 
+.string-labels {
+  position: absolute;
+  top: calc(max(18px, env(safe-area-inset-top)) + 38px);
+  left: 16vw;
+  right: 16vw;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  pointer-events: none;
+}
+
+.string-label {
+  min-width: 1ch;
+  text-align: center;
+  font-family: ui-serif, Georgia, "Times New Roman", serif;
+  font-size: clamp(22px, 5vw, 26px);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: rgba(245, 229, 191, 0.62);
+  transition:
+    color 160ms ease,
+    opacity 160ms ease;
+}
+
+.string-label[data-active="1"] {
+  color: rgba(245, 229, 191, 0.9);
+}
+
+.string-label[data-locked="1"] {
+  color: rgba(235, 198, 92, 0.98);
+}
+
 .brand-mark {
   position: absolute;
   top: max(18px, env(safe-area-inset-top));
@@ -132,9 +164,11 @@ button {
   0%,
   100% {
     box-shadow: 0 0 0 0 rgba(239, 207, 152, 0);
+    transform: scale(1);
   }
   50% {
-    box-shadow: 0 0 0 10px rgba(239, 207, 152, 0.14);
+    box-shadow: 0 0 0 14px rgba(239, 207, 152, 0.22);
+    transform: scale(1.04);
   }
 }
 

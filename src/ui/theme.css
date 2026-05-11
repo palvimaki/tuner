@@ -174,8 +174,9 @@ button {
   height: 18px;
 }
 
-.preset-lines span {
+.preset-line {
   width: 3px;
+  height: var(--preset-line-h);
   border-radius: 999px;
   background: linear-gradient(180deg, rgba(255, 244, 223, 0.9), rgba(195, 177, 147, 0.52));
 }

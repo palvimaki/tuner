@@ -1,10 +1,18 @@
 import type { TuningPreset } from "../domain/instrument";
 
-function presetGlyph(preset: TuningPreset): string {
+function presetGlyph(preset: TuningPreset): HTMLSpanElement {
   const baseMidi = preset.strings[0]?.midi ?? 0;
-  return preset.strings
-    .map((stringDef) => `<span style="height:${10 + (stringDef.midi - baseMidi) * 1.5}px"></span>`)
-    .join("");
+  const lines = document.createElement("span");
+  lines.className = "preset-lines";
+
+  preset.strings.forEach((stringDef) => {
+    const line = document.createElement("span");
+    line.className = "preset-line";
+    line.style.setProperty("--preset-line-h", `${10 + (stringDef.midi - baseMidi) * 1.5}px`);
+    lines.appendChild(line);
+  });
+
+  return lines;
 }
 
 export interface ControlsOptions {
@@ -49,7 +57,7 @@ export function createControls(options: ControlsOptions): ControlsHandle {
     button.setAttribute("aria-label", preset.name);
     button.dataset.presetId = preset.id;
     if (preset.id === options.activePresetId) button.dataset.active = "1";
-    button.innerHTML = `<span class="preset-lines">${presetGlyph(preset)}</span>`;
+    button.appendChild(presetGlyph(preset));
     button.addEventListener("click", () => {
       options.onSelect(preset.id);
       panel.hidden = true;

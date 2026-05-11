@@ -1,7 +1,7 @@
 function safe(fn, fallback) {
   try {
     return fn();
-  } catch {
+  } catch (_e) {
     return fallback;
   }
 }
@@ -36,8 +36,8 @@ function expandIpv6(ip) {
   return parts.length === 8 ? parts : null;
 }
 
-export function anonymizeIp(r) {
-  return safe(() => {
+function anonymizeIp(r) {
+  return safe(function () {
     const raw = r.remoteAddress || "";
     const v4 = raw.startsWith("::ffff:") ? raw.slice(7) : raw;
     const match = v4.match(/^(\d+)\.(\d+)\.(\d+)\.\d+$/);
@@ -49,8 +49,8 @@ export function anonymizeIp(r) {
   }, "::");
 }
 
-export function classifyUa(r) {
-  return safe(() => {
+function classifyUa(r) {
+  return safe(function () {
     const ua = String(r.headersIn["User-Agent"] || "").toLowerCase();
     if (ua.includes("bot") || ua.includes("spider") || ua.includes("crawler")) return "bot";
     if (ua.includes("iphone") || ua.includes("ipad")) return "ios";
@@ -60,3 +60,5 @@ export function classifyUa(r) {
     return "other";
   }, "other");
 }
+
+export default { anonymizeIp, classifyUa };

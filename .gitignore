@@ -3,3 +3,5 @@ dist/
 .DS_Store
 sources/
 *.log
+.orchestration/*
+!.orchestration/BUILD-REPORT.md

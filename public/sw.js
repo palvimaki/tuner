@@ -31,6 +31,10 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
   if (request.mode === "navigate") {
     event.respondWith(networkFirst(request, SHELL_CACHE));
     return;
@@ -50,13 +54,14 @@ async function networkFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
   try {
     const response = await fetch(request);
-    cache.put(request, response.clone());
+    if (response && response.ok && response.type === "basic") {
+      await cache.put(request, response.clone());
+    }
     return response;
   } catch {
-    return (
-      (await cache.match(request)) ||
-      (await cache.match(request.url.endsWith("/app/") ? "/app/" : "/"))
-    );
+    const fallback =
+      (await cache.match("/app/")) || (await cache.match("/")) || (await cache.match(SHELL_ASSETS[0]));
+    return fallback || Response.error();
   }
 }
 
@@ -65,6 +70,8 @@ async function cacheFirst(request, cacheName) {
   const cached = await cache.match(request);
   if (cached) return cached;
   const response = await fetch(request);
-  cache.put(request, response.clone());
+  if (response && response.ok && response.type === "basic") {
+    await cache.put(request, response.clone());
+  }
   return response;
 }

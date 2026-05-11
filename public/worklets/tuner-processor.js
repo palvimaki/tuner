@@ -63,24 +63,58 @@ function parabolicPeak(buffer, index) {
   const left = buffer[index - 1] ?? buffer[index];
   const center = buffer[index];
   const right = buffer[index + 1] ?? center;
-  const denominator = left - 2 * center + right;
-  if (denominator === 0) return index;
-  return index + (left - right) / (2 * denominator);
+  const a = left / 2 - center + right / 2;
+  if (a === 0) {
+    return { index, value: center };
+  }
+  const b = -(left / 2) * (2 * index + 1) + center * (2 * index) - (right / 2) * (2 * index - 1);
+  const c =
+    (left * index * (index + 1)) / 2 -
+    center * (index - 1) * (index + 1) +
+    (right * index * (index - 1)) / 2;
+  const refinedIndex = -b / (2 * a);
+  return {
+    index: refinedIndex,
+    value: a * refinedIndex * refinedIndex + b * refinedIndex + c,
+  };
+}
+
+const MPM_CLARITY_THRESHOLD = 0.9;
+
+function collectKeyMaximumIndices(nsdf) {
+  const keyIndices = [];
+  let lookingForMaximum = false;
+  let maxIndex = -1;
+  let maxValue = -Infinity;
+
+  for (let i = 1; i < nsdf.length - 1; i += 1) {
+    const previous = nsdf[i - 1] ?? 0;
+    const value = nsdf[i] ?? 0;
+    if (previous <= 0 && value > 0) {
+      lookingForMaximum = true;
+      maxIndex = i;
+      maxValue = value;
+    } else if (previous > 0 && value <= 0) {
+      lookingForMaximum = false;
+      if (maxIndex !== -1) keyIndices.push(maxIndex);
+    } else if (lookingForMaximum && value > maxValue) {
+      maxValue = value;
+      maxIndex = i;
+    }
+  }
+
+  return keyIndices;
 }
 
 function pickPeak(nsdf) {
-  let bestIndex = -1;
-  let bestValue = 0;
-  let seenPositive = false;
-  for (let i = 1; i < nsdf.length - 1; i += 1) {
-    const value = nsdf[i];
-    if (value > 0) seenPositive = true;
-    if (seenPositive && value > bestValue && value > nsdf[i - 1] && value >= nsdf[i + 1]) {
-      bestIndex = i;
-      bestValue = value;
-    }
-  }
-  return bestIndex;
+  const keyMaximumIndices = collectKeyMaximumIndices(nsdf);
+  if (keyMaximumIndices.length === 0) return -1;
+
+  const maxKeyMaximum = keyMaximumIndices.reduce((best, index) => {
+    return Math.max(best, nsdf[index] ?? 0);
+  }, -Infinity);
+  const threshold = maxKeyMaximum * MPM_CLARITY_THRESHOLD;
+  return keyMaximumIndices.find((index) => (nsdf[index] ?? 0) >= threshold) ?? -1;
 }
 
 function findPitchMPM(input, sampleRate) {
@@ -88,10 +122,10 @@ function findPitchMPM(input, sampleRate) {
   const peakIndex = pickPeak(nsdf);
   if (peakIndex <= 0) return { hz: 0, clarity: 0 };
   const refined = parabolicPeak(nsdf, peakIndex);
-  const period = refined > 0 ? refined : peakIndex;
+  const period = refined.index > 0 ? refined.index : peakIndex;
   return {
     hz: sampleRate / period,
-    clarity: Math.max(0, Math.min(1, nsdf[peakIndex] || 0)),
+    clarity: Math.max(0, Math.min(1, refined.value)),
   };
 }
 
@@ -112,6 +146,7 @@ class TunerProcessor extends AudioWorkletProcessor {
     this.hpPrevInput = 0;
     this.lpState = 0;
     this.analysisCounter = 0;
+    this.hzHistory = [];
     this.port.onmessage = (event) => {
       if (event.data?.type === "config") {
         this.targets = event.data.targets ?? this.targets;
@@ -168,7 +203,7 @@ class TunerProcessor extends AudioWorkletProcessor {
       const hp = input[i] - this.hpPrevInput + 0.992 * this.hpState;
       this.hpPrevInput = input[i];
       this.hpState = hp;
-      this.lpState = this.lpState + 0.16 * (hp - this.lpState);
+      this.lpState = this.lpState + 0.4 * (hp - this.lpState);
       this.buffer[this.writeIndex] = this.lpState;
       this.writeIndex = (this.writeIndex + 1) % this.buffer.length;
       this.totalSamples += 1;
@@ -211,14 +246,29 @@ class TunerProcessor extends AudioWorkletProcessor {
     this.slowRmsDb = this.slowRmsDb + alpha * (shortRmsDb - this.slowRmsDb);
     const nowMs = currentTime * 1000;
     const onset =
-      shortRmsDb >= -48 &&
+      shortRmsDb >= -54 &&
       shortRmsDb - this.slowRmsDb >= this.onsetThresholdDb &&
       nowMs - this.lastOnsetMs >= this.onsetDebounceMs;
 
     if (onset) this.lastOnsetMs = nowMs;
 
+    const rawHz = selected.hz;
+    if (rawHz > 0) {
+      if (onset) this.hzHistory = [rawHz];
+      else {
+        this.hzHistory.push(rawHz);
+        if (this.hzHistory.length > 3) this.hzHistory.shift();
+      }
+    } else {
+      this.hzHistory = [];
+    }
+    const hz = this.hzHistory.length === 0
+      ? 0
+      : [...this.hzHistory].sort((a, b) => a - b)[Math.floor(this.hzHistory.length / 2)];
+
     this.port.postMessage({
-      hz: selected.hz,
+      hz,
+      rawHz,
       clarity: selected.clarity,
       rmsDb: shortRmsDb,
       shortRmsDb,

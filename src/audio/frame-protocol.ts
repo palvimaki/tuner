@@ -5,6 +5,7 @@ export interface AnalysisTarget {
 
 export interface AnalysisFrame {
   hz: number;
+  rawHz?: number;
   clarity: number;
   rmsDb: number;
   shortRmsDb: number;

@@ -190,6 +190,12 @@ button {
   backdrop-filter: blur(10px);
 }
 
+.glass-veil[hidden],
+.fallback-glyph[hidden],
+.preset-panel[hidden] {
+  display: none !important;
+}
+
 .glass-button {
   width: 110px;
   height: 110px;

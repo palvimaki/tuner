@@ -1,6 +1,7 @@
 {
   "name": "tuner.fi",
   "short_name": "tuner.fi",
+  "id": "/app/",
   "start_url": "/app/",
   "scope": "/app/",
   "display": "standalone",

@@ -1,20 +1,17 @@
 /*!
- * Adapted McLeod Pitch Method implementation derived from pitchy 4.1.0
- * (https://github.com/ianprime0509/pitchy).
- *
- * Copyright Ian Johnson — Licensed under the ISC License.
- *
- * Permission to use, copy, modify, and/or distribute this software for any purpose
- * with or without fee is hereby granted.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
- * REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
- * FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
- * INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
- * OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
- * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
- * THIS SOFTWARE.
+ * tuner-processor — YIN/CMNDF F0 estimation with optional MPM fallback debug
+ * candidate. The YIN algorithm is in the public domain
+ * (de Cheveigné & Kawahara, 2002). The MPM helper section is adapted from
+ * pitchy 4.1.0 (https://github.com/ianprime0509/pitchy), © Ian Johnson,
+ * ISC License — permission to use, copy, modify, and/or distribute granted.
  */
+
+const YIN_THRESHOLD = 0.15;
+const YIN_MIN_HZ = 55;
+const YIN_MAX_HZ = 1400;
+const TRANSIENT_SUPPRESS_MS = 120;
+const STABLE_TAIL_CENTS = 25;
+const STABLE_TAIL_FRAMES = 3;
 
 function toDb(value) {
   return 20 * Math.log10(Math.max(value, 1e-9));
@@ -31,7 +28,7 @@ function goertzelMagnitude(signal, sampleRate, targetHz) {
     q2 = q1;
     q1 = q0;
   }
-  return Math.sqrt(q1 * q1 + q2 * q2 - coeff * q1 * q2);
+  return Math.sqrt(Math.max(0, q1 * q1 + q2 * q2 - coeff * q1 * q2));
 }
 
 function bandDb(signal, sampleRate, hz) {
@@ -43,6 +40,77 @@ function bandDb(signal, sampleRate, hz) {
   return toDb(total);
 }
 
+// ---- YIN ----
+function yinDifference(input, maxTau) {
+  const out = new Float32Array(maxTau);
+  for (let tau = 1; tau < maxTau; tau += 1) {
+    let sum = 0;
+    for (let i = 0; i < maxTau; i += 1) {
+      const delta = input[i] - input[i + tau];
+      sum += delta * delta;
+    }
+    out[tau] = sum;
+  }
+  return out;
+}
+
+function yinCmnd(diff) {
+  const out = new Float32Array(diff.length);
+  out[0] = 1;
+  let running = 0;
+  for (let tau = 1; tau < diff.length; tau += 1) {
+    running += diff[tau];
+    out[tau] = running > 0 ? (diff[tau] * tau) / running : 1;
+  }
+  return out;
+}
+
+function parabolicTau(d, tau) {
+  if (tau <= 0 || tau >= d.length - 1) return tau;
+  const s0 = d[tau - 1];
+  const s1 = d[tau];
+  const s2 = d[tau + 1];
+  const denom = s0 + s2 - 2 * s1;
+  if (denom === 0) return tau;
+  return tau + (s0 - s2) / (2 * denom);
+}
+
+function findPitchYIN(input, sampleRate) {
+  const maxTau = Math.min(input.length >> 1, Math.ceil(sampleRate / YIN_MIN_HZ) + 2);
+  const minTau = Math.max(2, Math.floor(sampleRate / YIN_MAX_HZ));
+  if (maxTau <= minTau + 2) return { hz: 0, confidence: 0, cmndAtTau: 1 };
+
+  const diff = yinDifference(input, maxTau);
+  const cmnd = yinCmnd(diff);
+
+  let tauEst = -1;
+  for (let tau = minTau; tau < maxTau - 1; tau += 1) {
+    if (cmnd[tau] < YIN_THRESHOLD) {
+      while (tau + 1 < maxTau - 1 && cmnd[tau + 1] < cmnd[tau]) tau += 1;
+      tauEst = tau;
+      break;
+    }
+  }
+  if (tauEst === -1) {
+    let bestTau = minTau;
+    let bestVal = cmnd[minTau];
+    for (let tau = minTau + 1; tau < maxTau - 1; tau += 1) {
+      if (cmnd[tau] < bestVal) {
+        bestVal = cmnd[tau];
+        bestTau = tau;
+      }
+    }
+    tauEst = bestTau;
+  }
+
+  const cmndAtTau = cmnd[tauEst];
+  const refined = parabolicTau(cmnd, tauEst);
+  const hz = refined > 0 ? sampleRate / refined : 0;
+  const confidence = Math.max(0, Math.min(1, 1 - cmndAtTau));
+  return { hz, confidence, cmndAtTau };
+}
+
+// ---- MPM (debug fallback only) ----
 function computeNsdf(input) {
   const out = new Float32Array(input.length >> 1);
   for (let tau = 0; tau < out.length; tau += 1) {
@@ -64,9 +132,7 @@ function parabolicPeak(buffer, index) {
   const center = buffer[index];
   const right = buffer[index + 1] ?? center;
   const a = left / 2 - center + right / 2;
-  if (a === 0) {
-    return { index, value: center };
-  }
+  if (a === 0) return { index, value: center };
   const b = -(left / 2) * (2 * index + 1) + center * (2 * index) - (right / 2) * (2 * index - 1);
   const c =
     (left * index * (index + 1)) / 2 -
@@ -79,50 +145,34 @@ function parabolicPeak(buffer, index) {
   };
 }
 
-const MPM_CLARITY_THRESHOLD = 0.9;
-
-function collectKeyMaximumIndices(nsdf) {
-  const keyIndices = [];
-  let lookingForMaximum = false;
+function findPitchMPM(input, sampleRate) {
+  const nsdf = computeNsdf(input);
+  let lookingForMax = false;
   let maxIndex = -1;
   let maxValue = -Infinity;
-
+  const keys = [];
   for (let i = 1; i < nsdf.length - 1; i += 1) {
-    const previous = nsdf[i - 1] ?? 0;
-    const value = nsdf[i] ?? 0;
-    if (previous <= 0 && value > 0) {
-      lookingForMaximum = true;
+    const prev = nsdf[i - 1];
+    const value = nsdf[i];
+    if (prev <= 0 && value > 0) {
+      lookingForMax = true;
       maxIndex = i;
       maxValue = value;
-    } else if (previous > 0 && value <= 0) {
-      lookingForMaximum = false;
-      if (maxIndex !== -1) keyIndices.push(maxIndex);
-    } else if (lookingForMaximum && value > maxValue) {
+    } else if (prev > 0 && value <= 0) {
+      lookingForMax = false;
+      if (maxIndex !== -1) keys.push(maxIndex);
+    } else if (lookingForMax && value > maxValue) {
       maxValue = value;
       maxIndex = i;
     }
   }
-
-  return keyIndices;
-}
-
-function pickPeak(nsdf) {
-  const keyMaximumIndices = collectKeyMaximumIndices(nsdf);
-  if (keyMaximumIndices.length === 0) return -1;
-
-  const maxKeyMaximum = keyMaximumIndices.reduce((best, index) => {
-    return Math.max(best, nsdf[index] ?? 0);
-  }, -Infinity);
-  const threshold = maxKeyMaximum * MPM_CLARITY_THRESHOLD;
-  return keyMaximumIndices.find((index) => (nsdf[index] ?? 0) >= threshold) ?? -1;
-}
-
-function findPitchMPM(input, sampleRate) {
-  const nsdf = computeNsdf(input);
-  const peakIndex = pickPeak(nsdf);
-  if (peakIndex <= 0) return { hz: 0, clarity: 0 };
-  const refined = parabolicPeak(nsdf, peakIndex);
-  const period = refined.index > 0 ? refined.index : peakIndex;
+  if (keys.length === 0) return { hz: 0, clarity: 0 };
+  const maxKey = keys.reduce((b, idx) => Math.max(b, nsdf[idx]), -Infinity);
+  const threshold = maxKey * 0.9;
+  const picked = keys.find((idx) => nsdf[idx] >= threshold);
+  if (picked == null || picked <= 0) return { hz: 0, clarity: 0 };
+  const refined = parabolicPeak(nsdf, picked);
+  const period = refined.index > 0 ? refined.index : picked;
   return {
     hz: sampleRate / period,
     clarity: Math.max(0, Math.min(1, refined.value)),
@@ -147,6 +197,7 @@ class TunerProcessor extends AudioWorkletProcessor {
     this.lpState = 0;
     this.analysisCounter = 0;
     this.hzHistory = [];
+    this.recentHz = [];
     this.port.onmessage = (event) => {
       if (event.data?.type === "config") {
         this.targets = event.data.targets ?? this.targets;
@@ -220,13 +271,8 @@ class TunerProcessor extends AudioWorkletProcessor {
 
     const small = this.copyWindow(2048);
     const large = this.copyWindow(4096);
-    const resultSmall = findPitchMPM(small, sampleRate);
-    const resultLarge = findPitchMPM(large, sampleRate);
-    const useLarge =
-      resultSmall.hz < 110 || resultSmall.clarity < 0.86 || resultLarge.hz < 110;
-    const selected = useLarge ? resultLarge : resultSmall;
-    const signal = useLarge ? large : small;
 
+    // Short-frame RMS / onset detection runs every analysis hop.
     let sum = 0;
     let mean = 0;
     for (let i = 0; i < 256; i += 1) {
@@ -241,7 +287,6 @@ class TunerProcessor extends AudioWorkletProcessor {
       variance += delta * delta;
     }
     variance /= 256;
-
     const shortRms = Math.sqrt(sum / 256);
     const shortRmsDb = toDb(shortRms);
     const hopMs = (512 / sampleRate) * 1000;
@@ -252,36 +297,90 @@ class TunerProcessor extends AudioWorkletProcessor {
       shortRmsDb >= -54 &&
       shortRmsDb - this.slowRmsDb >= this.onsetThresholdDb &&
       nowMs - this.lastOnsetMs >= this.onsetDebounceMs;
-
     if (onset) this.lastOnsetMs = nowMs;
 
-    const rawHz = selected.hz;
-    if (rawHz > 0) {
+    const transientSuppressed = nowMs - this.lastOnsetMs < TRANSIENT_SUPPRESS_MS;
+
+    // YIN on both windows; pick best by confidence with a small bias toward
+    // the larger window (lower error on low strings).
+    const yinSmall = findPitchYIN(small, sampleRate);
+    const yinLarge = findPitchYIN(large, sampleRate);
+    const preferLarge =
+      yinSmall.hz < 110 ||
+      yinSmall.confidence < 0.7 ||
+      yinLarge.confidence >= yinSmall.confidence - 0.05;
+    const yin = preferLarge ? yinLarge : yinSmall;
+    const signal = preferLarge ? large : small;
+    const sampleWindow = preferLarge ? 4096 : 2048;
+
+    // MPM kept as a debug-only secondary candidate.
+    const mpm = findPitchMPM(signal, sampleRate);
+
+    const f0CandidateHz = yin.hz;
+    const confidence = yin.confidence;
+    const lowConfidence = confidence < 0.6 || transientSuppressed;
+
+    const rawHz = f0CandidateHz;
+    if (rawHz > 0 && !transientSuppressed) {
       if (onset) this.hzHistory = [rawHz];
       else {
         this.hzHistory.push(rawHz);
         if (this.hzHistory.length > 3) this.hzHistory.shift();
       }
-    } else {
+    } else if (!rawHz) {
       this.hzHistory = [];
     }
     const hz = this.hzHistory.length === 0
       ? 0
       : [...this.hzHistory].sort((a, b) => a - b)[Math.floor(this.hzHistory.length / 2)];
 
+    // Stable-tail: last N raw frames within STABLE_TAIL_CENTS of one another.
+    if (rawHz > 0 && !transientSuppressed) {
+      this.recentHz.push(rawHz);
+      if (this.recentHz.length > STABLE_TAIL_FRAMES) this.recentHz.shift();
+    } else if (transientSuppressed || rawHz <= 0) {
+      this.recentHz = [];
+    }
+    let stableTail = false;
+    if (this.recentHz.length === STABLE_TAIL_FRAMES) {
+      const ref = this.recentHz[STABLE_TAIL_FRAMES - 1];
+      stableTail = this.recentHz.every((value) => {
+        const cents = 1200 * Math.log2(value / ref);
+        return Math.abs(cents) <= STABLE_TAIL_CENTS;
+      });
+    }
+
+    const stringScores = this.profileScores(signal);
+
     this.port.postMessage({
       hz,
       rawHz,
-      clarity: selected.clarity,
+      clarity: confidence,
       rmsDb: shortRmsDb,
       shortRmsDb,
       slowRmsDb: this.slowRmsDb,
       onset,
       variance,
       amplitude: shortRms,
-      sampleWindow: useLarge ? 4096 : 2048,
-      profileScores: this.profileScores(signal),
+      sampleWindow,
+      // profileScores kept as the legacy key; stringScores/candidateStringScores
+      // mirror it for new consumers per the MVP plan.
+      profileScores: stringScores,
+      stringScores,
+      candidateStringScores: stringScores,
+      f0CandidateHz,
+      confidence,
+      lowConfidence,
+      stableTail,
+      transientSuppressed,
       timestampMs: nowMs,
+      debug: {
+        yinHz: yin.hz,
+        yinConfidence: yin.confidence,
+        cmndAtTau: yin.cmndAtTau,
+        mpmHz: mpm.hz,
+        mpmClarity: mpm.clarity,
+      },
     });
 
     return true;

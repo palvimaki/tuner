@@ -1,6 +1,5 @@
 export interface VersionInfo {
   appVersion: string;
-  samplesVersion: string;
   buildTime: string;
 }
 

@@ -1,6 +1,27 @@
 import type { TuningPreset } from "../domain/instrument";
 import type { RenderString } from "./scene";
 
+function createIcon(className: string, paths: readonly string[]): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", `hud-icon ${className}`);
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+
+  paths.forEach((pathData) => {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", pathData);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    path.setAttribute("stroke-width", "2.15");
+    svg.appendChild(path);
+  });
+
+  return svg;
+}
+
 function presetGlyph(preset: TuningPreset): HTMLSpanElement {
   const midis = preset.strings.map((stringDef) => stringDef.midi);
   const minMidi = Math.min(...midis);
@@ -45,15 +66,12 @@ export function createControls(options: ControlsOptions): ControlsHandle {
   const brand = document.createElement("button");
   brand.type = "button";
   brand.className = "brand-mark";
-  brand.setAttribute("aria-label", "tuner.fi");
+  brand.setAttribute("aria-label", "Install tuner.fi");
   brand.setAttribute("aria-haspopup", "dialog");
   brand.setAttribute("aria-expanded", "false");
   brand.setAttribute("aria-controls", "install-panel");
   if (options.installPulse) brand.dataset.pulse = "1";
-  const brandText = document.createElement("span");
-  brandText.className = "brand-mark-text";
-  brandText.textContent = "t";
-  brand.appendChild(brandText);
+  brand.appendChild(createIcon("install-icon", ["M12 4v11", "m7 10 5 5 5-5", "M5 20h14"]));
 
   const labelRail = document.createElement("div");
   labelRail.className = "string-labels";
@@ -64,6 +82,7 @@ export function createControls(options: ControlsOptions): ControlsHandle {
   toggle.className = "picker-toggle";
   toggle.setAttribute("aria-label", "Tunings");
   if (options.pulse) toggle.dataset.pulse = "1";
+  toggle.appendChild(createIcon("tuning-fork-icon", ["M8 3v9a4 4 0 0 0 8 0V3", "M12 16v5", "M9 21h6"]));
 
   const panel = document.createElement("div");
   panel.className = "preset-panel";

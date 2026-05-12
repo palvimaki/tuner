@@ -48,6 +48,7 @@ button {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  z-index: 2;
 }
 
 .brand-mark,
@@ -115,14 +116,17 @@ button {
   cursor: pointer;
 }
 
-.brand-mark-text {
-  font-family: ui-serif, Georgia, "Times New Roman", serif;
-  font-size: 24px;
-  font-weight: 500;
-  line-height: 1;
+.hud-icon {
+  display: block;
+  width: 21px;
+  height: 21px;
   color: rgba(247, 232, 199, 0.96);
-  letter-spacing: 0;
-  transform: translateY(-1px);
+  fill: none;
+  stroke: rgba(247, 232, 199, 0.96);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.15;
+  filter: drop-shadow(0 0 8px rgba(239, 207, 152, 0.18));
 }
 
 .picker-toggle {
@@ -135,28 +139,15 @@ button {
   border-radius: 50%;
   background: rgba(34, 26, 20, 0.42);
   backdrop-filter: blur(16px);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  cursor: pointer;
 }
 
-.picker-toggle::before,
-.picker-toggle::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  width: 14px;
-  height: 2px;
-  background: rgba(241, 229, 204, 0.82);
-  transform: translateX(-50%);
-}
-
-.picker-toggle::before {
-  top: 13px;
-  box-shadow: 0 6px 0 rgba(241, 229, 204, 0.82), 0 12px 0 rgba(241, 229, 204, 0.82);
-}
-
-.picker-toggle::after {
-  top: 19px;
-  width: 2px;
-  height: 14px;
+.tuning-fork-icon {
+  width: 22px;
+  height: 22px;
 }
 
 .brand-mark[data-pulse="1"],
@@ -332,6 +323,7 @@ button {
   pointer-events: none;
   background: rgba(10, 7, 7, 0.26);
   backdrop-filter: blur(10px);
+  z-index: 1;
 }
 
 .glass-veil[hidden],
@@ -411,6 +403,7 @@ button {
   border: 1px solid rgba(245, 229, 191, 0.18);
   background: rgba(244, 234, 209, 0.08);
   backdrop-filter: blur(18px);
+  z-index: 3;
 }
 
 .fallback-arrow,

@@ -28,7 +28,6 @@ function buildPreset(id: string, name: string, notes: readonly string[]): Tuning
         id: note,
         midi,
         hz,
-        sampleId: note,
         targetHz: hz,
         displayLabel: asciiLabel(note),
         centOffset: 0,

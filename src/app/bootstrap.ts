@@ -10,13 +10,13 @@ import {
   markInstallHintOpened,
   markMicGranted,
 } from "./session";
-import { applyAnalysisFrame, createInitialState, resetForPreset, setManualTarget } from "./state";
+import { applyAnalysisFrame, createInitialState, resetForPreset } from "./state";
 import { getPresetById } from "../domain/tuning";
 import { resolveStringTargetHz } from "../domain/instrument";
 import { createControls } from "../ui/controls";
 import { createFallbackGlyph } from "../ui/fallback-glyph";
 import { Renderer } from "../ui/renderer";
-import { buildRenderState, nearestStringIndexFromX } from "../ui/scene";
+import { buildRenderState } from "../ui/scene";
 import { requestWakeLock, releaseWakeLock } from "../pwa/wake-lock";
 import { loadVersionInfo, registerServiceWorker } from "../pwa/version";
 
@@ -45,7 +45,6 @@ function targetsForPreset(preset: ReturnType<typeof getPresetById>): AnalysisTar
 export async function bootstrapApp(root: HTMLElement): Promise<void> {
   const version = await loadVersionInfo().catch(() => ({
     appVersion: "0.1.0",
-    samplesVersion: "1",
     buildTime: new Date().toISOString(),
   }));
   await registerServiceWorker(version.appVersion);
@@ -99,13 +98,7 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
   const engine = new AudioEngine(instrument, version);
   engine.onFrame((frame) => {
     const nowMs = performance.now();
-    const effects = applyAnalysisFrame(state, frame, preset, nowMs);
-    if (effects.lockedStringId) {
-      engine.playLockPing();
-    }
-    if (effects.completed) {
-      engine.playCompletionStrum(preset);
-    }
+    applyAnalysisFrame(state, frame, preset, nowMs);
     const renderState = buildRenderState(state, preset, !fallback.hidden, !hasOpenedControls(), nowMs);
     controls.setStringLabels(renderState.strings);
     renderer.setState(renderState);
@@ -141,18 +134,6 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
   if (hasKnownMicGrant()) {
     void startAudio();
   }
-
-  canvas.addEventListener("pointerdown", (event) => {
-    const rect = canvas.getBoundingClientRect();
-    const index = nearestStringIndexFromX(rect.width, preset.strings.length, event.clientX - rect.left);
-    const targetString = preset.strings[index] ?? preset.strings[0];
-    const targetStringId = targetString.id;
-    setManualTarget(state, preset, targetStringId, performance.now());
-    engine.playReference(targetStringId, resolveStringTargetHz(targetString));
-    const renderState = buildRenderState(state, preset, !fallback.hidden, !hasOpenedControls(), performance.now());
-    controls.setStringLabels(renderState.strings);
-    renderer.setState(renderState);
-  });
 
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {

@@ -1,0 +1,22 @@
+{
+  "datasetId": "tuner-fi-sample",
+  "version": "0.1.0",
+  "entries": [
+    {
+      "id": "guitar-E2-0001",
+      "instrument": "guitar",
+      "stringId": "E2",
+      "targetHz": 82.4069,
+      "durationMs": 1500,
+      "features": { "rmsDb": -22.1, "clarity": 0.93 }
+    },
+    {
+      "id": "guitar-A2-0001",
+      "instrument": "guitar",
+      "stringId": "A2",
+      "targetHz": 110.0,
+      "durationMs": 1500,
+      "features": { "rmsDb": -21.4, "clarity": 0.95 }
+    }
+  ]
+}

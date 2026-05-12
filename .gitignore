@@ -5,3 +5,16 @@ sources/
 *.log
 .orchestration/*
 !.orchestration/BUILD-REPORT.md
+
+# Local-only ML/dataset artifacts — never commit user audio or raw recordings.
+datasets/
+recordings/
+*.wav
+*.flac
+*.aiff
+*.aif
+*.mp3
+*.ogg
+*.m4a
+scripts/dataset-out/
+!scripts/fixtures/

@@ -136,7 +136,7 @@ export function createControls(options: ControlsOptions): ControlsHandle {
   aboutBlock.className = "install-about";
   const aboutCopy = document.createElement("p");
   aboutCopy.textContent =
-    "tuner.fi is a Finnish, open source guitar tuner, privacy ensuring by architecture, and engineered for accuracy. All microphone input is kept strictly on user's device. All calculation happens client-side. Enjoy!";
+    "Tuner.fi is a Finnish open-source guitar tuner, built for privacy by design and engineered for accuracy. Microphone input stays strictly on your device, and all calculations happen client-side. Enjoy!";
   const aboutLink = document.createElement("a");
   aboutLink.href = "https://github.com/palvimaki/tuner";
   aboutLink.target = "_blank";

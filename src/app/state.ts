@@ -5,15 +5,11 @@ import { resolveStringTargetHz, type InstrumentString, type TuningPreset } from 
 export type TunerMode = "idle" | "probing" | "latched" | "locked" | "completed";
 export const TUNE_LOCK_MS = 1_000;
 export const LOCK_STABLE_FRAMES = 2;
-export const BASE_LOCK_TOLERANCE_CENTS = 7;
-export const LOW_STRING_LOCK_TOLERANCE_CENTS = 11;
-export const LOW_STRING_LOCK_HZ = 90;
 export const HIGH_CONFIDENCE_CLARITY = 0.9;
 export const HIGH_CONFIDENCE_RMS_DB = -45;
 
 export interface StringVisualState {
   cents: number | null;
-  instantCents: number | null;
   rawCents: number | null;
   pitchPenaltyCents: number;
   amplitude: number;
@@ -64,7 +60,6 @@ export function createInitialState(preset: TuningPreset): AppState {
         stringDef.id,
         {
           cents: null,
-          instantCents: null,
           rawCents: null,
           pitchPenaltyCents: 0,
           amplitude: 0,
@@ -148,22 +143,16 @@ function smoothCents(previous: number | null, next: number | null): number | nul
   return previous + (next - previous) * 0.32;
 }
 
-function lockToleranceCents(targetHz: number): number {
-  return targetHz < LOW_STRING_LOCK_HZ ? LOW_STRING_LOCK_TOLERANCE_CENTS : BASE_LOCK_TOLERANCE_CENTS;
-}
-
 function hydrateFrameIntoStrings(state: AppState, frame: AnalysisFrame, preset: TuningPreset): void {
   for (const stringDef of preset.strings) {
     const targetState = state.strings[stringDef.id];
     if (frame.hz > 0) {
       const tuningCents = tuningCentsFromHz(frame.hz, resolveStringTargetHz(stringDef));
       targetState.rawCents = tuningCents.rawCents;
-      targetState.instantCents = tuningCents.cents;
       targetState.pitchPenaltyCents = tuningCents.penalty;
       targetState.cents = smoothCents(targetState.cents, tuningCents.cents);
     } else {
       targetState.rawCents = null;
-      targetState.instantCents = null;
       targetState.pitchPenaltyCents = 0;
       targetState.cents = smoothCents(targetState.cents, null);
     }
@@ -376,14 +365,8 @@ export function applyAnalysisFrame(
 
     const currentId = state.activeStringId;
     const current = state.strings[currentId];
-    const currentDef = preset.strings.find((stringDef) => stringDef.id === currentId);
-    const toleranceCents = currentDef
-      ? lockToleranceCents(resolveStringTargetHz(currentDef))
-      : BASE_LOCK_TOLERANCE_CENTS;
     const displayCentsAbs = Math.abs(current.cents ?? Infinity);
-    const instantCentsAbs = Math.abs(current.instantCents ?? Infinity);
-    const lockCentsAbs = Math.min(displayCentsAbs, instantCentsAbs);
-    const inTune = lockCentsAbs <= toleranceCents;
+    const inTune = displayCentsAbs <= 7;
     const lockEligible = inTune && !transient && highConfidence && stableTail;
 
     if (lockEligible) {

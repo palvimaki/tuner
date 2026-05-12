@@ -1,6 +1,6 @@
 {
   "name": "tuner-fi",
-  "version": "0.1.7",
+  "version": "0.1.9",
   "private": true,
   "type": "module",
   "description": "Privacy-first guitar tuner PWA.",

@@ -53,7 +53,9 @@ button {
 .brand-mark,
 .picker-toggle,
 .preset-panel,
+.preset-button,
 .glass-veil,
+.mic-button,
 .fallback-glyph {
   pointer-events: auto;
 }
@@ -102,29 +104,22 @@ button {
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  border: 1px solid rgba(238, 217, 170, 0.22);
+  border: 1px solid rgba(238, 217, 170, 0.28);
+  background: rgba(34, 26, 20, 0.42);
   backdrop-filter: blur(12px);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
 }
 
-.brand-mark::before,
-.brand-mark::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 12px;
-  height: 2px;
-  background: rgba(242, 228, 192, 0.78);
-  transform: translate(-50%, -50%);
-  box-shadow:
-    0 -8px 0 rgba(242, 228, 192, 0.34),
-    0 8px 0 rgba(242, 228, 192, 0.34);
-}
-
-.brand-mark::after {
-  width: 2px;
-  height: 18px;
-  box-shadow: none;
+.brand-mark-text {
+  font-family: ui-serif, Georgia, "Times New Roman", serif;
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1;
+  color: rgba(247, 232, 199, 0.96);
+  letter-spacing: 0;
+  transform: translateY(-1px);
 }
 
 .picker-toggle {
@@ -182,42 +177,66 @@ button {
   top: calc(max(18px, env(safe-area-inset-top)) + 48px);
   right: max(18px, env(safe-area-inset-right));
   display: grid;
-  gap: 8px;
-  padding: 10px;
-  border-radius: 20px;
-  background: rgba(20, 15, 13, 0.72);
-  border: 1px solid rgba(234, 214, 178, 0.12);
+  grid-auto-rows: min-content;
+  gap: 4px;
+  padding: 8px;
+  width: min(220px, calc(100vw - 32px));
+  border-radius: 18px;
+  background: rgba(20, 15, 13, 0.82);
+  border: 1px solid rgba(234, 214, 178, 0.14);
   backdrop-filter: blur(18px);
+  z-index: 2;
 }
 
 .preset-button {
-  width: 46px;
-  height: 46px;
-  border-radius: 16px;
-  border: 1px solid rgba(238, 214, 174, 0.1);
-  background: rgba(49, 40, 34, 0.46);
+  width: 100%;
+  min-height: 40px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
   display: grid;
-  place-items: center;
-  padding: 0;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  text-align: left;
+  color: rgba(245, 229, 191, 0.86);
+}
+
+.preset-button:hover,
+.preset-button:focus-visible {
+  background: rgba(49, 40, 34, 0.5);
+  outline: none;
 }
 
 .preset-button[data-active="1"] {
-  border-color: rgba(247, 226, 162, 0.46);
-  box-shadow: 0 0 0 1px rgba(247, 226, 162, 0.18) inset;
+  background: rgba(56, 46, 38, 0.62);
+  border-color: rgba(247, 226, 162, 0.32);
+  color: rgba(252, 240, 209, 0.98);
+}
+
+.preset-name {
+  font-family: ui-serif, Georgia, "Times New Roman", serif;
+  font-size: 15px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 
 .preset-lines {
   display: flex;
   align-items: end;
+  justify-content: center;
   gap: 2px;
-  height: 18px;
+  width: 28px;
+  height: 22px;
 }
 
 .preset-line {
-  width: 3px;
+  width: 2px;
   height: var(--preset-line-h);
   border-radius: 999px;
-  background: linear-gradient(180deg, rgba(255, 244, 223, 0.9), rgba(195, 177, 147, 0.52));
+  background: linear-gradient(180deg, rgba(255, 244, 223, 0.92), rgba(195, 177, 147, 0.56));
 }
 
 .glass-veil {
@@ -235,39 +254,63 @@ button {
   display: none !important;
 }
 
-.glass-button {
-  width: 110px;
-  height: 110px;
+.mic-button {
+  width: 124px;
+  height: 124px;
   border-radius: 50%;
-  border: 1px solid rgba(245, 229, 191, 0.18);
-  background: radial-gradient(circle at 40% 30%, rgba(255, 243, 216, 0.18), rgba(63, 49, 39, 0.24));
+  border: 1px solid rgba(245, 229, 191, 0.22);
+  background: radial-gradient(circle at 40% 30%, rgba(255, 243, 216, 0.18), rgba(63, 49, 39, 0.28));
   box-shadow:
-    0 16px 44px rgba(0, 0, 0, 0.25),
-    inset 0 1px 0 rgba(255, 249, 235, 0.12);
+    0 16px 44px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 249, 235, 0.14);
   position: relative;
+  cursor: pointer;
 }
 
-.glass-button::before,
-.glass-button::after {
+.mic-capsule {
+  position: absolute;
+  left: 50%;
+  top: 26px;
+  width: 30px;
+  height: 46px;
+  border-radius: 18px;
+  background: rgba(247, 233, 200, 0.94);
+  transform: translateX(-50%);
+}
+
+.mic-stand {
+  position: absolute;
+  left: 50%;
+  top: 58px;
+  width: 50px;
+  height: 22px;
+  border: 2px solid rgba(247, 233, 200, 0.9);
+  border-top: none;
+  border-radius: 0 0 28px 28px;
+  transform: translateX(-50%);
+  background: transparent;
+}
+
+.mic-base {
+  position: absolute;
+  left: 50%;
+  top: 80px;
+  width: 2px;
+  height: 12px;
+  background: rgba(247, 233, 200, 0.9);
+  transform: translateX(-50%);
+}
+
+.mic-base::after {
   content: "";
   position: absolute;
   left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  top: 12px;
+  width: 36px;
+  height: 2px;
+  background: rgba(247, 233, 200, 0.9);
   border-radius: 999px;
-}
-
-.glass-button::before {
-  width: 28px;
-  height: 28px;
-  border: 2px solid rgba(245, 229, 191, 0.78);
-  box-shadow: 0 -18px 0 -13px rgba(245, 229, 191, 0.78);
-}
-
-.glass-button::after {
-  width: 2px;
-  height: 30px;
-  background: rgba(245, 229, 191, 0.82);
+  transform: translateX(-50%);
 }
 
 .fallback-glyph {

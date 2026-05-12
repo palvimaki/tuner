@@ -92,9 +92,11 @@ export class Renderer {
       }
 
       if (stringState.active || stringState.locked || stringState.inTune) {
-        context.fillStyle = stringState.locked || stringState.inTune ? "rgba(88, 226, 122, 0.98)" : "rgba(255, 228, 171, 0.78)";
+        const settledDot = stringState.locked || stringState.inTune;
+        const dotX = settledDot ? x : x + guideShift;
+        context.fillStyle = settledDot ? "rgba(88, 226, 122, 0.98)" : "rgba(255, 228, 171, 0.78)";
         context.beginPath();
-        context.arc(x + guideShift, height * 0.5, stringState.locked || stringState.inTune ? 10 : 8, 0, Math.PI * 2);
+        context.arc(dotX, height * 0.5, settledDot ? 10 : 8, 0, Math.PI * 2);
         context.fill();
         if (stringState.locked || stringState.inTune) {
           const ringRadius = 15 + stringState.lockProgress * 7;

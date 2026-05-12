@@ -34,3 +34,9 @@ export interface Instrument {
   analysis: AnalysisProfile;
   iips?: readonly import("./iip").IIP[];
 }
+
+export function resolveStringTargetHz(stringDef: InstrumentString): number {
+  const baseHz = stringDef.targetHz ?? stringDef.hz;
+  const centOffset = stringDef.centOffset ?? 0;
+  return baseHz * 2 ** (centOffset / 1200);
+}

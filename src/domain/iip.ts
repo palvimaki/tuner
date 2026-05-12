@@ -88,7 +88,7 @@ export interface StringClassifier {
 // ---------------------------------------------------------------------------
 
 export type ModelKind = "pitch" | "string-classifier" | "multi-f0" | "embedding";
-export type ModelRuntime = "tfjs" | "onnx" | "wasm" | "native";
+export type ModelRuntime = "tfjs" | "onnx" | "onnx-webgpu" | "webnn" | "wasm" | "native";
 
 export interface ModelManifest {
   id: string;
@@ -131,6 +131,7 @@ export interface RuntimeCapabilities {
   sharedArrayBuffer: boolean;
   wasm: boolean;
   webgpu: boolean;
+  webnn: boolean;
   offlineAudioContext: boolean;
 }
 
@@ -144,11 +145,16 @@ export function detectRuntimeCapabilities(
   globalRef: unknown = typeof globalThis !== "undefined" ? globalThis : undefined,
 ): RuntimeCapabilities {
   const g = (globalRef ?? {}) as Record<string, unknown>;
+  const navigatorRef = (g["navigator"] ?? {}) as Record<string, unknown>;
   return {
     audioWorklet: typeof g["AudioWorkletNode"] === "function",
     sharedArrayBuffer: typeof g["SharedArrayBuffer"] === "function",
     wasm: typeof g["WebAssembly"] === "object" && g["WebAssembly"] !== null,
-    webgpu: typeof g["GPUAdapter"] === "function",
+    webgpu: typeof navigatorRef["gpu"] === "object" && navigatorRef["gpu"] !== null,
+    webnn:
+      typeof navigatorRef["ml"] === "object" ||
+      typeof g["MLContext"] === "function" ||
+      typeof g["MLGraphBuilder"] === "function",
     offlineAudioContext: typeof g["OfflineAudioContext"] === "function",
   };
 }

@@ -46,11 +46,11 @@ describe("IIP contracts", () => {
       id: "pitch-crepe-tiny",
       kind: "pitch",
       version: "1.0.0",
-      runtime: "tfjs",
+      runtime: "onnx-webgpu",
       assetUrl: "/models/crepe-tiny.json",
       capabilities: { polyphonic: false, maxVoices: 1 },
     };
-    expect(manifest.kind).toBe("pitch");
+    expect(manifest.runtime).toBe("onnx-webgpu");
   });
 
   it("accepts a polyphonic analyzer contract", () => {
@@ -70,6 +70,15 @@ describe("IIP contracts", () => {
     const caps = detectRuntimeCapabilities({});
     expect(caps.audioWorklet).toBe(false);
     expect(caps.wasm).toBe(false);
+    expect(caps.webgpu).toBe(false);
+    expect(caps.webnn).toBe(false);
+
+    const browserCaps = detectRuntimeCapabilities({
+      navigator: { gpu: {}, ml: {} },
+      WebAssembly: {},
+    });
+    expect(browserCaps.webgpu).toBe(true);
+    expect(browserCaps.webnn).toBe(true);
 
     const check: CapabilityCheck = {
       id: "needs-worklet",

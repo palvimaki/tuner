@@ -237,8 +237,7 @@ describe("session lock and completion", () => {
           E4: -4,
         },
         timestampMs: 0,
-        // @ts-expect-error optional richer field
-        transient: true,
+        transientSuppressed: true,
       },
       preset,
       0,
@@ -246,6 +245,43 @@ describe("session lock and completion", () => {
 
     expect(state.strings.E4.lockStartedMs).toBeNull();
     expect(state.strings.E4.lockedInThisSession).toBe(false);
+  });
+
+  it("requires stable-tail frames before locking when the worklet provides the flag", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "E4";
+    state.mode = "latched";
+    const frame = {
+      hz: 329.628,
+      clarity: 0.98,
+      confidence: 0.94,
+      rmsDb: -16,
+      shortRmsDb: -16,
+      slowRmsDb: -30,
+      onset: false,
+      variance: 1e-3,
+      amplitude: 0.2,
+      sampleWindow: 2048 as const,
+      profileScores: {
+        E2: -40,
+        A2: -37,
+        D3: -30,
+        G3: -22,
+        B3: -12,
+        E4: -4,
+      },
+      timestampMs: 0,
+    };
+
+    applyAnalysisFrame(state, { ...frame, stableTail: false }, preset, 0);
+    const unstable = applyAnalysisFrame(state, { ...frame, stableTail: false }, preset, 1_200);
+    expect(unstable.lockedStringId).toBeNull();
+    expect(state.strings.E4.lockedInThisSession).toBe(false);
+
+    applyAnalysisFrame(state, { ...frame, stableTail: true }, preset, 1_260);
+    const stable = applyAnalysisFrame(state, { ...frame, stableTail: true }, preset, 2_300);
+    expect(stable.lockedStringId).toBe("E4");
   });
 
   it("octave-shifted harmonic frames can tune the latched manual target without changing identity", () => {

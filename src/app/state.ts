@@ -5,11 +5,22 @@ import { resolveStringTargetHz, type InstrumentString, type TuningPreset } from 
 export type TunerMode = "idle" | "probing" | "latched" | "locked" | "completed";
 export const TUNE_LOCK_MS = 1_000;
 export const LOCK_STABLE_FRAMES = 2;
+export const BASE_LOCK_TOLERANCE_CENTS = 7;
+export const LOW_STRING_LOCK_TOLERANCE_CENTS = 11;
+export const LOW_STRING_LOCK_HZ = 90;
 export const HIGH_CONFIDENCE_CLARITY = 0.9;
 export const HIGH_CONFIDENCE_RMS_DB = -45;
+const PROFILE_PENALTY_CENTS_PER_DB = 5;
+const PROFILE_PENALTY_MAX_CENTS = 120;
+const LOW_STRING_HZ = 100;
+const LOW_STRING_HARMONIC_MAX_CENTS = 16;
+const LOW_STRING_HARMONIC_PROFILE_ADVANTAGE_DB = 6;
+const LOW_STRING_HARMONIC_MIN_PENALTY_CENTS = 40;
+const LOW_STRING_HARMONIC_MAX_PENALTY_CENTS = 55;
 
 export interface StringVisualState {
   cents: number | null;
+  instantCents: number | null;
   rawCents: number | null;
   pitchPenaltyCents: number;
   amplitude: number;
@@ -60,6 +71,7 @@ export function createInitialState(preset: TuningPreset): AppState {
         stringDef.id,
         {
           cents: null,
+          instantCents: null,
           rawCents: null,
           pitchPenaltyCents: 0,
           amplitude: 0,
@@ -102,6 +114,10 @@ function tuningCentsFromHz(frequency: number, referenceHz: number): { rawCents: 
       ? candidate
       : best,
   );
+}
+
+function lockToleranceCents(targetHz: number): number {
+  return targetHz < LOW_STRING_LOCK_HZ ? LOW_STRING_LOCK_TOLERANCE_CENTS : BASE_LOCK_TOLERANCE_CENTS;
 }
 
 export function nearestPresetStringByLogDistance(
@@ -149,10 +165,12 @@ function hydrateFrameIntoStrings(state: AppState, frame: AnalysisFrame, preset: 
     if (frame.hz > 0) {
       const tuningCents = tuningCentsFromHz(frame.hz, resolveStringTargetHz(stringDef));
       targetState.rawCents = tuningCents.rawCents;
+      targetState.instantCents = tuningCents.cents;
       targetState.pitchPenaltyCents = tuningCents.penalty;
       targetState.cents = smoothCents(targetState.cents, tuningCents.cents);
     } else {
       targetState.rawCents = null;
+      targetState.instantCents = null;
       targetState.pitchPenaltyCents = 0;
       targetState.cents = smoothCents(targetState.cents, null);
     }
@@ -168,22 +186,129 @@ function candidatePitchDistance(state: StringVisualState): number {
   return Math.abs(cents) + state.pitchPenaltyCents;
 }
 
+function bestProfileScore(state: AppState): number {
+  return Object.values(state.strings).reduce(
+    (best, stringState) => Math.max(best, stringState.scoreDb),
+    -120,
+  );
+}
+
+function profilePenaltyCents(stringState: StringVisualState, frameBestScoreDb: number): number {
+  const deficitDb = Math.max(0, frameBestScoreDb - stringState.scoreDb);
+  return Math.min(PROFILE_PENALTY_MAX_CENTS, deficitDb * PROFILE_PENALTY_CENTS_PER_DB);
+}
+
+function weightedPitchDistance(
+  stringState: StringVisualState,
+  frameBestScoreDb: number,
+): number {
+  const baseDistance = candidatePitchDistance(stringState);
+  if (!Number.isFinite(baseDistance)) return Infinity;
+  return baseDistance + profilePenaltyCents(stringState, frameBestScoreDb);
+}
+
+function isLowStringHarmonicCandidate(
+  stringDef: InstrumentString,
+  stringState: StringVisualState,
+): boolean {
+  const targetHz = resolveStringTargetHz(stringDef);
+  return (
+    targetHz < LOW_STRING_HZ &&
+    Math.abs(stringState.cents ?? Infinity) <= LOW_STRING_HARMONIC_MAX_CENTS &&
+    stringState.pitchPenaltyCents >= LOW_STRING_HARMONIC_MIN_PENALTY_CENTS &&
+    stringState.pitchPenaltyCents <= LOW_STRING_HARMONIC_MAX_PENALTY_CENTS
+  );
+}
+
+function hasCompetingLowStringHarmonic(
+  state: AppState,
+  preset: TuningPreset,
+  stringId: string,
+): boolean {
+  const current = state.strings[stringId];
+  if (current.pitchPenaltyCents !== 0) return false;
+  return preset.strings.some((stringDef) => {
+    if (stringDef.id === stringId) return false;
+    const candidate = state.strings[stringDef.id];
+    return (
+      isLowStringHarmonicCandidate(stringDef, candidate) &&
+      candidate.scoreDb >= current.scoreDb + LOW_STRING_HARMONIC_PROFILE_ADVANTAGE_DB
+    );
+  });
+}
+
+function hasCompetingDirectSameNote(
+  state: AppState,
+  preset: TuningPreset,
+  stringId: string,
+): boolean {
+  const currentDef = preset.strings.find((stringDef) => stringDef.id === stringId);
+  const current = state.strings[stringId];
+  if (!currentDef || current.pitchPenaltyCents === 0) return false;
+
+  return preset.strings.some((stringDef) => {
+    if (stringDef.id === stringId || !sameNoteClass(stringDef, currentDef)) return false;
+    const candidate = state.strings[stringDef.id];
+    return (
+      candidate.pitchPenaltyCents === 0 &&
+      candidatePitchDistance(candidate) <= LOW_STRING_HARMONIC_MAX_CENTS &&
+      candidate.scoreDb + LOW_STRING_HARMONIC_PROFILE_ADVANTAGE_DB >= current.scoreDb
+    );
+  });
+}
+
+function lowStringHarmonicShouldChallenge(
+  state: AppState,
+  challenger: InstrumentString,
+  activeState: StringVisualState,
+): boolean {
+  if (state.manualTargetStringId) return false;
+  const challengerState = state.strings[challenger.id];
+  return (
+    activeState.pitchPenaltyCents === 0 &&
+    isLowStringHarmonicCandidate(challenger, challengerState) &&
+    challengerState.scoreDb >= activeState.scoreDb + LOW_STRING_HARMONIC_PROFILE_ADVANTAGE_DB
+  );
+}
+
 function likelyFrameString(
   state: AppState,
   preset: TuningPreset,
 ): { stringDef: InstrumentString; scoreDb: number; pitchDistance: number } | null {
+  const frameBestScoreDb = bestProfileScore(state);
   const candidates = preset.strings
     .map((stringDef) => {
       const stringState = state.strings[stringDef.id];
       return {
         stringDef,
         scoreDb: stringState.scoreDb,
-        pitchDistance: candidatePitchDistance(stringState),
+        pitchDistance: weightedPitchDistance(stringState, frameBestScoreDb),
+        basePitchDistance: candidatePitchDistance(stringState),
+        lowStringHarmonic: isLowStringHarmonicCandidate(stringDef, stringState),
       };
     })
+    .filter((candidate) => candidate.basePitchDistance <= 120);
+
+  const directCandidate = candidates
+    .filter((candidate) => state.strings[candidate.stringDef.id].pitchPenaltyCents === 0)
+    .sort((a, b) => b.scoreDb - a.scoreDb)[0];
+  const lowStringHarmonic = candidates
+    .filter((candidate) => candidate.lowStringHarmonic)
+    .sort((a, b) => b.scoreDb - a.scoreDb)[0];
+  if (
+    lowStringHarmonic &&
+    directCandidate &&
+    lowStringHarmonic.scoreDb >= directCandidate.scoreDb + LOW_STRING_HARMONIC_PROFILE_ADVANTAGE_DB
+  ) {
+    return lowStringHarmonic;
+  }
+
+  const ranked = candidates
     .filter((candidate) => candidate.pitchDistance <= 120)
     .sort((a, b) => {
-      const distanceDelta = a.pitchDistance - b.pitchDistance;
+      const distanceDelta = sameNoteClass(a.stringDef, b.stringDef)
+        ? a.basePitchDistance - b.basePitchDistance
+        : a.pitchDistance - b.pitchDistance;
       if (!sameNoteClass(a.stringDef, b.stringDef) && Math.abs(distanceDelta) >= 12) {
         return distanceDelta;
       }
@@ -191,26 +316,48 @@ function likelyFrameString(
       return b.scoreDb - a.scoreDb;
     });
 
-  return candidates[0] ?? null;
+  return ranked[0] ?? null;
 }
 
 function bestChallenger(
   state: AppState,
   preset: TuningPreset,
-): { stringDef: InstrumentString; marginDb: number; scoreDb: number; pitchDistance: number } | null {
+): {
+  stringDef: InstrumentString;
+  marginDb: number;
+  scoreDb: number;
+  pitchDistance: number;
+  basePitchDistance: number;
+} | null {
   const active = preset.strings.find((stringDef) => stringDef.id === state.activeStringId);
   if (!active) return null;
+  const activeState = state.strings[active.id];
+  const frameBestScoreDb = bestProfileScore(state);
   const candidates = preset.strings
     .filter((stringDef) => stringDef.id !== active.id)
-    .map((stringDef) => ({
-      stringDef,
-      pitchDistance: candidatePitchDistance(state.strings[stringDef.id]),
-      scoreDb: state.strings[stringDef.id].scoreDb,
-      marginDb: sameNoteClass(stringDef, active) ? 6 : 3,
-    }))
+    .map((stringDef) => {
+      const stringState = state.strings[stringDef.id];
+      return {
+        stringDef,
+        pitchDistance: weightedPitchDistance(stringState, frameBestScoreDb),
+        basePitchDistance: candidatePitchDistance(stringState),
+        scoreDb: stringState.scoreDb,
+        marginDb: sameNoteClass(stringDef, active) ? 6 : 3,
+      };
+    })
     .filter((candidate) => candidate.pitchDistance <= 120)
+    .filter((candidate) => {
+      if (!isLowStringHarmonicCandidate(active, activeState)) return true;
+      const candidateState = state.strings[candidate.stringDef.id];
+      return !(
+        candidateState.pitchPenaltyCents === 0 &&
+        activeState.scoreDb >= candidate.scoreDb + LOW_STRING_HARMONIC_PROFILE_ADVANTAGE_DB
+      );
+    })
     .sort((a, b) => {
-      const distanceDelta = a.pitchDistance - b.pitchDistance;
+      const distanceDelta = sameNoteClass(a.stringDef, b.stringDef)
+        ? a.basePitchDistance - b.basePitchDistance
+        : a.pitchDistance - b.pitchDistance;
       if (!sameNoteClass(a.stringDef, b.stringDef) && Math.abs(distanceDelta) >= 12) {
         return distanceDelta;
       }
@@ -301,7 +448,8 @@ export function applyAnalysisFrame(
     const target = state.manualTargetStringId
       ? preset.strings.find((s) => s.id === state.manualTargetStringId)
       : undefined;
-    const nearest = target ?? nearestPresetStringByLogDistance(frame.hz, preset);
+    const detected = target ? null : likelyFrameString(state, preset);
+    const nearest = target ?? detected?.stringDef ?? nearestPresetStringByLogDistance(frame.hz, preset);
     latchString(state, nearest.id, nowMs, 100);
   } else if (frame.hz > 0 && !state.activeStringId && highConfidence) {
     // Acquire by probe only when we have high-confidence evidence.
@@ -337,14 +485,24 @@ export function applyAnalysisFrame(
     // Challenger switching only when frame is stable and high confidence.
     if (highConfidence && !transient) {
       const challenger = bestChallenger(state, preset);
-      const activePitchDistance = candidatePitchDistance(activeState);
+      const activePitchDistance = weightedPitchDistance(activeState, bestProfileScore(state));
+      const challengerPitchDistance =
+        challenger && activeDef && sameNoteClass(challenger.stringDef, activeDef)
+          ? challenger.basePitchDistance
+          : challenger?.pitchDistance;
+      const activeSwitchDistance =
+        challenger && activeDef && sameNoteClass(challenger.stringDef, activeDef)
+          ? candidatePitchDistance(activeState)
+          : activePitchDistance;
 
       if (
         challenger &&
         activeDef &&
+        challengerPitchDistance !== undefined &&
         nowMs > state.onsetLatchUntilMs &&
-        (challenger.pitchDistance + 24 + targetBias <= activePitchDistance ||
-          (activePitchDistance > 80 + targetBias &&
+        (lowStringHarmonicShouldChallenge(state, challenger.stringDef, activeState) ||
+          challengerPitchDistance + 24 + targetBias <= activeSwitchDistance ||
+          (activeSwitchDistance > 80 + targetBias &&
             challenger.scoreDb >= activeState.scoreDb + challenger.marginDb + (targetBias > 0 ? 6 : 0)))
       ) {
         state.switchLeadFrames += 1;
@@ -365,9 +523,21 @@ export function applyAnalysisFrame(
 
     const currentId = state.activeStringId;
     const current = state.strings[currentId];
+    const currentDef = preset.strings.find((stringDef) => stringDef.id === currentId);
+    const toleranceCents = currentDef
+      ? lockToleranceCents(resolveStringTargetHz(currentDef))
+      : BASE_LOCK_TOLERANCE_CENTS;
     const displayCentsAbs = Math.abs(current.cents ?? Infinity);
-    const inTune = displayCentsAbs <= 7;
-    const lockEligible = inTune && !transient && highConfidence && stableTail;
+    const instantCentsAbs = Math.abs(current.instantCents ?? Infinity);
+    const inTune = Math.max(displayCentsAbs, instantCentsAbs) <= toleranceCents;
+    const lockEligible =
+      inTune &&
+      weightedPitchDistance(current, bestProfileScore(state)) <= 120 &&
+      !hasCompetingLowStringHarmonic(state, preset, currentId) &&
+      !hasCompetingDirectSameNote(state, preset, currentId) &&
+      !transient &&
+      highConfidence &&
+      stableTail;
 
     if (lockEligible) {
       current.lockStartedMs ??= nowMs;

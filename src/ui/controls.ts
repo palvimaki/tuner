@@ -23,13 +23,16 @@ function presetGlyph(preset: TuningPreset): HTMLSpanElement {
 export interface ControlsOptions {
   presets: readonly TuningPreset[];
   activePresetId: string;
+  installPulse: boolean;
   pulse: boolean;
+  onInstallDismiss?(): void;
   onSelect(presetId: string): void;
   onOpenOnce?(): void;
 }
 
 export interface ControlsHandle {
   root: HTMLDivElement;
+  setInstallPulse(active: boolean): void;
   setPulse(active: boolean): void;
   setActivePreset(presetId: string): void;
   setStringLabels(strings: readonly RenderString[]): void;
@@ -39,10 +42,14 @@ export function createControls(options: ControlsOptions): ControlsHandle {
   const root = document.createElement("div");
   root.className = "hud";
 
-  const brand = document.createElement("div");
+  const brand = document.createElement("button");
+  brand.type = "button";
   brand.className = "brand-mark";
   brand.setAttribute("aria-label", "tuner.fi");
-  brand.setAttribute("role", "img");
+  brand.setAttribute("aria-haspopup", "dialog");
+  brand.setAttribute("aria-expanded", "false");
+  brand.setAttribute("aria-controls", "install-panel");
+  if (options.installPulse) brand.dataset.pulse = "1";
   const brandText = document.createElement("span");
   brandText.className = "brand-mark-text";
   brandText.textContent = "t";
@@ -62,6 +69,50 @@ export function createControls(options: ControlsOptions): ControlsHandle {
   panel.className = "preset-panel";
   panel.hidden = true;
   let openedOnce = false;
+
+  const installPanel = document.createElement("div");
+  installPanel.className = "install-panel";
+  installPanel.id = "install-panel";
+  installPanel.setAttribute("role", "dialog");
+  installPanel.setAttribute("aria-labelledby", "install-panel-title");
+  installPanel.hidden = true;
+
+  const installHeader = document.createElement("div");
+  installHeader.className = "install-header";
+  const installTitle = document.createElement("h2");
+  installTitle.className = "install-title";
+  installTitle.id = "install-panel-title";
+  installTitle.textContent = "Install tuner.fi";
+  const closeInstall = document.createElement("button");
+  closeInstall.type = "button";
+  closeInstall.className = "install-close";
+  closeInstall.setAttribute("aria-label", "Close install instructions");
+  closeInstall.textContent = "x";
+  installHeader.append(installTitle, closeInstall);
+
+  const installLead = document.createElement("p");
+  installLead.className = "install-lead";
+  installLead.textContent = "Add tuner.fi to your home screen for offline tuning and full app experience.";
+
+  const iphoneStep = document.createElement("section");
+  iphoneStep.className = "install-step";
+  const iphoneTitle = document.createElement("h3");
+  iphoneTitle.textContent = "iPhone / Safari";
+  const iphoneCopy = document.createElement("p");
+  iphoneCopy.innerHTML =
+    "Open tuner.fi in Safari. Tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>. Make sure <strong>Open as Web App</strong> is switched on, then tap <strong>Add</strong>.";
+  iphoneStep.append(iphoneTitle, iphoneCopy);
+
+  const androidStep = document.createElement("section");
+  androidStep.className = "install-step";
+  const androidTitle = document.createElement("h3");
+  androidTitle.textContent = "Android / Chrome";
+  const androidCopy = document.createElement("p");
+  androidCopy.innerHTML =
+    "Tap Chrome's menu, then <strong>Install app</strong> (or <strong>Add to Home screen</strong>). Choose <strong>Install</strong> - this opens tuner.fi as a proper web app, not a shortcut.";
+  androidStep.append(androidTitle, androidCopy);
+
+  installPanel.append(installHeader, installLead, iphoneStep, androidStep);
 
   const buttons = new Map<string, HTMLButtonElement>();
 
@@ -87,13 +138,45 @@ export function createControls(options: ControlsOptions): ControlsHandle {
 
   toggle.addEventListener("click", () => {
     panel.hidden = !panel.hidden;
+    if (!panel.hidden) {
+      installPanel.hidden = true;
+      brand.setAttribute("aria-expanded", "false");
+    }
     if (!panel.hidden && !openedOnce) {
       openedOnce = true;
       options.onOpenOnce?.();
     }
   });
 
-  root.append(labelRail, brand, toggle, panel);
+  const dismissInstallPanel = (): void => {
+    installPanel.hidden = true;
+    brand.setAttribute("aria-expanded", "false");
+    options.onInstallDismiss?.();
+  };
+
+  brand.addEventListener("click", () => {
+    if (!installPanel.hidden) {
+      dismissInstallPanel();
+      return;
+    }
+    installPanel.hidden = false;
+    brand.setAttribute("aria-expanded", "true");
+    panel.hidden = true;
+  });
+
+  closeInstall.addEventListener("click", () => {
+    dismissInstallPanel();
+    brand.focus();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !installPanel.hidden) {
+      dismissInstallPanel();
+      brand.focus();
+    }
+  });
+
+  root.append(labelRail, brand, toggle, panel, installPanel);
 
   const syncLabelRail = (strings: readonly RenderString[]): void => {
     const nextIds = strings.map((stringState) => stringState.id);
@@ -128,6 +211,10 @@ export function createControls(options: ControlsOptions): ControlsHandle {
 
   return {
     root,
+    setInstallPulse(active) {
+      if (active) brand.dataset.pulse = "1";
+      else delete brand.dataset.pulse;
+    },
     setPulse(active) {
       if (active) toggle.dataset.pulse = "1";
       else delete toggle.dataset.pulse;

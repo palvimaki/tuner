@@ -51,6 +51,7 @@ button {
 }
 
 .brand-mark,
+.install-panel,
 .picker-toggle,
 .preset-panel,
 .preset-button,
@@ -110,6 +111,8 @@ button {
   display: grid;
   place-items: center;
   overflow: hidden;
+  padding: 0;
+  cursor: pointer;
 }
 
 .brand-mark-text {
@@ -156,6 +159,7 @@ button {
   height: 14px;
 }
 
+.brand-mark[data-pulse="1"],
 .picker-toggle[data-pulse="1"] {
   animation: picker-pulse 2.2s ease-in-out infinite;
 }
@@ -186,6 +190,87 @@ button {
   border: 1px solid rgba(234, 214, 178, 0.14);
   backdrop-filter: blur(18px);
   z-index: 2;
+}
+
+.install-panel {
+  position: absolute;
+  top: calc(max(18px, env(safe-area-inset-top)) + 48px);
+  left: max(18px, env(safe-area-inset-left));
+  display: grid;
+  gap: 10px;
+  width: min(340px, calc(100vw - 36px));
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(20, 15, 13, 0.88);
+  border: 1px solid rgba(234, 214, 178, 0.16);
+  backdrop-filter: blur(18px);
+  color: rgba(245, 229, 191, 0.9);
+  z-index: 3;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+}
+
+.install-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.install-title {
+  margin: 0;
+  font-family: ui-serif, Georgia, "Times New Roman", serif;
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1.15;
+  color: rgba(252, 240, 209, 0.98);
+}
+
+.install-close {
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(238, 217, 170, 0.18);
+  border-radius: 50%;
+  background: rgba(34, 26, 20, 0.52);
+  color: rgba(252, 240, 209, 0.9);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.install-lead {
+  margin: 0;
+  max-width: 28rem;
+  font-size: 14px;
+  line-height: 1.42;
+  color: rgba(245, 229, 191, 0.82);
+}
+
+.install-step {
+  display: grid;
+  gap: 4px;
+  padding: 10px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  background: rgba(49, 40, 34, 0.34);
+}
+
+.install-step h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: rgba(252, 240, 209, 0.95);
+}
+
+.install-step p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.42;
+  color: rgba(245, 229, 191, 0.76);
+}
+
+.install-step strong {
+  color: rgba(252, 240, 209, 0.96);
+  font-weight: 700;
 }
 
 .preset-button {
@@ -251,6 +336,7 @@ button {
 
 .glass-veil[hidden],
 .fallback-glyph[hidden],
+.install-panel[hidden],
 .preset-panel[hidden] {
   display: none !important;
 }

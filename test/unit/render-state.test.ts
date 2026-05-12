@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createInitialState } from "../../src/app/state";
 import { guitarPresets } from "../../src/domain/instruments/guitar/presets";
-import { buildRenderState } from "../../src/ui/scene";
+import { buildRenderState, computeStringXs, nearestStringIndexFromX } from "../../src/ui/scene";
 
 describe("render state", () => {
   it("uses octave labels and exposes the in-tune progress state", () => {
@@ -37,5 +37,14 @@ describe("render state", () => {
     const highE = renderState.strings.find((stringState) => stringState.id === "E4");
 
     expect(highE?.donePulse).toBeGreaterThan(0.6);
+  });
+
+  it("hit-tests the same padded string positions used by the canvas renderer", () => {
+    const width = 1000;
+    const xs = computeStringXs(width, 6);
+
+    expect(nearestStringIndexFromX(width, 6, xs[0])).toBe(0);
+    expect(nearestStringIndexFromX(width, 6, xs[4])).toBe(4);
+    expect(nearestStringIndexFromX(width, 6, xs[5])).toBe(5);
   });
 });

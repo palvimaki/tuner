@@ -108,29 +108,41 @@ export class SamplePlayer {
     const attackSeconds = 0.035;
     const holdSeconds = 3.2;
     const durationSeconds = 5.2;
-    const gainValue = 0.18;
+    const lowString = frequency < 120;
+    const partials: Array<{ multiple: number; gain: number; type: OscillatorType }> = [
+      { multiple: 1, gain: lowString ? 0.2 : 0.18, type: "sine" },
+      { multiple: 2, gain: lowString ? 0.12 : 0.045, type: "sine" },
+      { multiple: 3, gain: lowString ? 0.04 : 0.018, type: "sine" },
+      { multiple: 4, gain: lowString ? 0.025 : 0.01, type: "sine" },
+    ];
 
     this.stopActiveReferenceTone(start);
 
-    const oscillator = this.context.createOscillator();
-    const gain = this.context.createGain();
+    const masterGain = this.context.createGain();
+    masterGain.gain.setValueAtTime(0.0001, start);
+    masterGain.gain.exponentialRampToValueAtTime(1, start + attackSeconds);
+    masterGain.gain.setValueAtTime(1, start + holdSeconds);
+    masterGain.gain.exponentialRampToValueAtTime(0.0001, start + durationSeconds);
+    masterGain.connect(this.context.destination);
 
-    oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(frequency, start);
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(gainValue, start + attackSeconds);
-    gain.gain.setValueAtTime(gainValue, start + holdSeconds);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + durationSeconds);
+    const oscillators = partials.map((partial) => {
+      const oscillator = this.context.createOscillator();
+      const partialGain = this.context.createGain();
+      oscillator.type = partial.type;
+      oscillator.frequency.setValueAtTime(frequency * partial.multiple, start);
+      partialGain.gain.setValueAtTime(partial.gain, start);
+      oscillator.connect(partialGain).connect(masterGain);
+      oscillator.start(start);
+      oscillator.stop(start + durationSeconds + 0.05);
+      return oscillator;
+    });
 
-    oscillator.connect(gain).connect(this.context.destination);
-    oscillator.start(start);
-    oscillator.stop(start + durationSeconds + 0.05);
-
-    const activeTone = { oscillators: [oscillator], gain };
+    const activeTone = { oscillators, gain: masterGain };
     this.activeReferenceTone = activeTone;
-    oscillator.onended = () => {
+    oscillators[0]?.addEventListener("ended", () => {
       if (this.activeReferenceTone === activeTone) this.activeReferenceTone = null;
-    };
+      masterGain.disconnect();
+    });
   }
 
   playReference(noteName: string, frequency = hzFromMidi(noteNameToMidi(noteName))): void {

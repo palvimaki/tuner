@@ -1,16 +1,16 @@
 # tuner.fi nginx deploy assets
 
-Use these files for the CASE-audit nginx hardening rollout:
+Reference nginx configuration and remote installer for hosting tuner.fi on a Debian/Ubuntu server with nginx + njs.
 
-- `ops/nginx/tuner-log.js`: njs helper shipped to `/etc/nginx/njs/tuner-log.js`
-- `ops/nginx/tuner.fi-privacy-log.conf`: http-scope `js_import`, `js_set`, and `log_format`
-- `ops/nginx/tuner.fi.conf`: merged tuner.fi vhost with certbot-managed TLS lines preserved
-- `ops/deploy/apply-on-haukka.sh`: idempotent remote installer for fixes 6-14
+- `ops/nginx/tuner-log.js` — njs helper, deployed to `/etc/nginx/njs/tuner-log.js`
+- `ops/nginx/tuner.fi-privacy-log.conf` — http-scope `js_import`, `js_set`, and `log_format`
+- `ops/nginx/tuner.fi.conf` — vhost with certbot-managed TLS lines preserved
+- `ops/deploy/apply-on-server.sh` — idempotent remote installer
 
-TARS runs the remote apply step from the repo root with:
+Run the remote apply step from the repo root:
 
 ```bash
-ssh haukka 'bash -s' < ops/deploy/apply-on-haukka.sh
+ssh "$DEPLOY_HOST" 'bash -s' < ops/deploy/apply-on-server.sh
 ```
 
 The script:
@@ -22,4 +22,4 @@ The script:
 5. runs `sudo nginx -t`
 6. reloads nginx
 
-After that, run `scripts/deploy.sh` and verify live with the CASE-AUDIT-REVIEW fix 14 curl probe list.
+After that, run `scripts/deploy.sh` to push the built static files.

@@ -29,16 +29,19 @@ assert_status() {
   fi
 }
 
+: "${DEPLOY_HOST:?Set DEPLOY_HOST to the SSH alias for the production server}"
+: "${DEPLOY_PATH:=/var/www/tuner.fi/}"
+
 npm ci
 npm run test
 npm run build
 
 if [[ "${1:-}" == "--dry-run" ]]; then
-  rsync -az --delete --exclude '.DS_Store' --dry-run dist/ haukka:/var/www/tuner.fi/
+  rsync -az --delete --exclude '.DS_Store' --dry-run dist/ "${DEPLOY_HOST}:${DEPLOY_PATH}"
   exit 0
 fi
 
-rsync -az --delete --exclude '.DS_Store' dist/ haukka:/var/www/tuner.fi/
+rsync -az --delete --exclude '.DS_Store' dist/ "${DEPLOY_HOST}:${DEPLOY_PATH}"
 curl -fsS https://tuner.fi/ >/dev/null
 
 hashed_js_path="$(

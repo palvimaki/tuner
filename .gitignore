@@ -3,8 +3,7 @@ dist/
 .DS_Store
 sources/
 *.log
-.orchestration/*
-!.orchestration/BUILD-REPORT.md
+.orchestration/
 
 # Local-only ML/dataset artifacts — never commit user audio or raw recordings.
 datasets/

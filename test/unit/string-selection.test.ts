@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyAnalysisFrame, createInitialState } from "../../src/app/state";
+import { applyAnalysisFrame, createInitialState, setManualTarget } from "../../src/app/state";
 import { scorePresetProfiles } from "../../src/audio/dsp/harmonic-profile";
 import { guitarPresets } from "../../src/domain/instruments/guitar/presets";
 import { makePluckSignal } from "../dsp/fixtures/signals";
@@ -271,6 +271,82 @@ describe("string switching hysteresis", () => {
     }
 
     expect(state.activeStringId).toBe("E4");
+  });
+
+  it("with manual target high E, refuses to switch to B even on B-like profile evidence", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    setManualTarget(state, preset, "E4", 0);
+
+    for (let frameIndex = 0; frameIndex < 6; frameIndex += 1) {
+      applyAnalysisFrame(
+        state,
+        {
+          hz: 329.628,
+          clarity: 0.96,
+          rmsDb: -18,
+          shortRmsDb: -18,
+          slowRmsDb: -32,
+          onset: false,
+          variance: 1e-3,
+          amplitude: 0.26,
+          sampleWindow: 2048,
+          profileScores: {
+            E2: -45,
+            A2: -42,
+            D3: -38,
+            G3: -22,
+            B3: -3,
+            E4: -18,
+          },
+          timestampMs: 0,
+        },
+        preset,
+        200 + frameIndex * 40,
+      );
+    }
+
+    expect(state.manualTargetStringId).toBe("E4");
+    expect(state.activeStringId).toBe("E4");
+  });
+
+  it("low-confidence frames hold the previous active string and do not advance lock", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "E4";
+    state.mode = "latched";
+
+    for (let frameIndex = 0; frameIndex < 5; frameIndex += 1) {
+      applyAnalysisFrame(
+        state,
+        {
+          hz: 329.628,
+          clarity: 0.84,
+          rmsDb: -50,
+          shortRmsDb: -50,
+          slowRmsDb: -55,
+          onset: false,
+          variance: 1e-3,
+          amplitude: 0.05,
+          sampleWindow: 2048,
+          profileScores: {
+            E2: -40,
+            A2: -30,
+            D3: -20,
+            G3: -10,
+            B3: -5,
+            E4: -45,
+          },
+          timestampMs: 0,
+        },
+        preset,
+        frameIndex * 300,
+      );
+    }
+
+    expect(state.activeStringId).toBe("E4");
+    expect(state.strings.E4.lockedInThisSession).toBe(false);
+    expect(state.strings.E4.lockStartedMs).toBeNull();
   });
 
   it("holds high E through third-harmonic frames that resemble B", () => {

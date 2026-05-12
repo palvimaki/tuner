@@ -42,6 +42,7 @@ function karplusStrongBuffer(
 
 export class SamplePlayer {
   private readonly buffers = new Map<string, AudioBuffer>();
+  private activeReferenceTone: { oscillators: OscillatorNode[]; gain: GainNode } | null = null;
 
   constructor(
     private readonly context: AudioContext,
@@ -78,12 +79,62 @@ export class SamplePlayer {
     source.stop(when + 1.15);
   }
 
-  playReference(noteName: string, atTime = this.context.currentTime): void {
+  private createSampleReference(noteName: string, atTime = this.context.currentTime): void {
     const mapping = resolveReferenceSample(noteName);
     const baseBuffer =
       this.buffers.get(mapping.baseId) ??
       karplusStrongBuffer(this.context, hzFromMidi(noteNameToMidi(noteName)));
     this.createVoice(baseBuffer, atTime, mapping.detuneCents, 0.34);
+  }
+
+  private stopActiveReferenceTone(atTime = this.context.currentTime): void {
+    if (!this.activeReferenceTone) return;
+
+    const { oscillators, gain } = this.activeReferenceTone;
+    gain.gain.cancelScheduledValues(atTime);
+    gain.gain.setTargetAtTime(0.0001, atTime, 0.025);
+    oscillators.forEach((oscillator) => {
+      try {
+        oscillator.stop(atTime + 0.15);
+      } catch {
+        // The node may already have been stopped by a prior scheduled release.
+      }
+    });
+    this.activeReferenceTone = null;
+  }
+
+  private createReferenceTone(frequency: number, atTime = this.context.currentTime): void {
+    const start = Math.max(atTime, this.context.currentTime);
+    const attackSeconds = 0.035;
+    const holdSeconds = 3.2;
+    const durationSeconds = 5.2;
+    const gainValue = 0.18;
+
+    this.stopActiveReferenceTone(start);
+
+    const oscillator = this.context.createOscillator();
+    const gain = this.context.createGain();
+
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(frequency, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(gainValue, start + attackSeconds);
+    gain.gain.setValueAtTime(gainValue, start + holdSeconds);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + durationSeconds);
+
+    oscillator.connect(gain).connect(this.context.destination);
+    oscillator.start(start);
+    oscillator.stop(start + durationSeconds + 0.05);
+
+    const activeTone = { oscillators: [oscillator], gain };
+    this.activeReferenceTone = activeTone;
+    oscillator.onended = () => {
+      if (this.activeReferenceTone === activeTone) this.activeReferenceTone = null;
+    };
+  }
+
+  playReference(noteName: string, frequency = hzFromMidi(noteNameToMidi(noteName))): void {
+    this.createReferenceTone(frequency);
   }
 
   playLockPing(): void {
@@ -108,7 +159,7 @@ export class SamplePlayer {
 
   playCompletionStrum(preset: TuningPreset): void {
     preset.strings.forEach((stringDef, index) => {
-      this.playReference(stringDef.id, this.context.currentTime + index * 0.035);
+      this.createSampleReference(stringDef.id, this.context.currentTime + index * 0.035);
     });
   }
 }

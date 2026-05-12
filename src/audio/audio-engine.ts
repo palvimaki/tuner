@@ -118,8 +118,8 @@ export class AudioEngine {
     await this.context?.resume();
   }
 
-  playReference(noteName: string): void {
-    this.samplePlayer?.playReference(noteName);
+  playReference(noteName: string, frequency?: number): void {
+    this.samplePlayer?.playReference(noteName, frequency);
   }
 
   playLockPing(): void {

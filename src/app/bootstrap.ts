@@ -139,9 +139,10 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     const rect = canvas.getBoundingClientRect();
     const ratio = (event.clientX - rect.left) / rect.width;
     const index = Math.max(0, Math.min(preset.strings.length - 1, Math.round(ratio * (preset.strings.length - 1))));
-    const targetStringId = preset.strings[index]?.id ?? preset.strings[0].id;
+    const targetString = preset.strings[index] ?? preset.strings[0];
+    const targetStringId = targetString.id;
     setManualTarget(state, preset, targetStringId, performance.now());
-    engine.playReference(targetStringId);
+    engine.playReference(targetStringId, resolveStringTargetHz(targetString));
     const renderState = buildRenderState(state, preset, !fallback.hidden, !hasOpenedControls(), performance.now());
     controls.setStringLabels(renderState.strings);
     renderer.setState(renderState);

@@ -18,6 +18,14 @@ describe("YIN pitch detection", () => {
     expect(result.confidence).toBeGreaterThan(0.7);
   });
 
+  it("resolves octave-below E1 instead of promoting it to low E", () => {
+    const target = 41.2034;
+    const signal = makePluckSignal(target, { length: 4096 });
+    const result = findPitchYin(signal, SR);
+    expect(Math.abs(centsFrom(result.hz, target))).toBeLessThan(12);
+    expect(result.hz).toBeLessThan(50);
+  });
+
   it("locks high E (E4) without slipping to B3 on a harmonic stack", () => {
     const target = 329.628;
     const signal = makePluckSignal(target, {

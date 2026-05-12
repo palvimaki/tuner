@@ -259,6 +259,32 @@ button {
   color: rgba(245, 229, 191, 0.76);
 }
 
+.install-about {
+  display: grid;
+  gap: 6px;
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(234, 214, 178, 0.12);
+  font-size: 12px;
+  line-height: 1.46;
+  color: rgba(245, 229, 191, 0.62);
+}
+
+.install-about p {
+  margin: 0;
+}
+
+.install-about a {
+  color: rgba(247, 226, 162, 0.9);
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+
+.install-about a:hover,
+.install-about a:focus-visible {
+  text-decoration: underline;
+}
+
 .install-step strong {
   color: rgba(252, 240, 209, 0.96);
   font-weight: 700;

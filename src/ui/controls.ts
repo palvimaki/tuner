@@ -132,7 +132,19 @@ export function createControls(options: ControlsOptions): ControlsHandle {
     "Tap Chrome's menu, then <strong>Install app</strong> (or <strong>Add to Home screen</strong>). Choose <strong>Install</strong> - this opens tuner.fi as a proper web app, not a shortcut.";
   androidStep.append(androidTitle, androidCopy);
 
-  installPanel.append(installHeader, installLead, iphoneStep, androidStep);
+  const aboutBlock = document.createElement("section");
+  aboutBlock.className = "install-about";
+  const aboutCopy = document.createElement("p");
+  aboutCopy.textContent =
+    "tuner.fi is a Finnish, open source guitar tuner, privacy ensuring by architecture, and engineered for accuracy. All microphone input is kept strictly on user's device. All calculation happens client-side. Enjoy!";
+  const aboutLink = document.createElement("a");
+  aboutLink.href = "https://github.com/palvimaki/tuner";
+  aboutLink.target = "_blank";
+  aboutLink.rel = "noopener noreferrer";
+  aboutLink.textContent = "GitHub project";
+  aboutBlock.append(aboutCopy, aboutLink);
+
+  installPanel.append(installHeader, installLead, iphoneStep, androidStep, aboutBlock);
 
   const buttons = new Map<string, HTMLButtonElement>();
 

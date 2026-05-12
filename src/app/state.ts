@@ -4,6 +4,9 @@ import type { InstrumentString, TuningPreset } from "../domain/instrument";
 
 export type TunerMode = "idle" | "probing" | "latched" | "locked" | "completed";
 export const TUNE_LOCK_MS = 1_000;
+export const LOCK_STABLE_FRAMES = 2;
+export const HIGH_CONFIDENCE_CLARITY = 0.9;
+export const HIGH_CONFIDENCE_RMS_DB = -45;
 
 export interface StringVisualState {
   cents: number | null;
@@ -14,12 +17,14 @@ export interface StringVisualState {
   lockStartedMs: number | null;
   lockedAtMs: number | null;
   scoreDb: number;
+  inToleranceFrames: number;
 }
 
 export interface AppState {
   mode: TunerMode;
   presetId: string;
   activeStringId: string | null;
+  manualTargetStringId: string | null;
   probeStringId: string | null;
   probeLeadFrames: number;
   onsetLatchUntilMs: number;
@@ -35,11 +40,17 @@ export interface FrameEffects {
   completed: boolean;
 }
 
+type RichFrame = AnalysisFrame & {
+  transient?: boolean;
+  confidence?: number;
+};
+
 export function createInitialState(preset: TuningPreset): AppState {
   return {
     mode: "idle",
     presetId: preset.id,
     activeStringId: null,
+    manualTargetStringId: null,
     probeStringId: null,
     probeLeadFrames: 0,
     onsetLatchUntilMs: 0,
@@ -59,6 +70,7 @@ export function createInitialState(preset: TuningPreset): AppState {
           lockStartedMs: null,
           lockedAtMs: null,
           scoreDb: -120,
+          inToleranceFrames: 0,
         },
       ]),
     ),
@@ -106,6 +118,20 @@ export function nearestPresetStringByLogDistance(
 
 function frameAdmitted(frame: AnalysisFrame): boolean {
   return frame.rmsDb >= -55 && frame.clarity >= 0.82 && Object.keys(frame.profileScores).length > 0;
+}
+
+function frameTransient(frame: AnalysisFrame): boolean {
+  const rich = frame as RichFrame;
+  if (rich.transient === true) return true;
+  return frame.onset === true;
+}
+
+function frameHighConfidence(frame: AnalysisFrame): boolean {
+  const rich = frame as RichFrame;
+  if (typeof rich.confidence === "number") {
+    return rich.confidence >= 0.7;
+  }
+  return frame.clarity >= HIGH_CONFIDENCE_CLARITY && frame.rmsDb >= HIGH_CONFIDENCE_RMS_DB;
 }
 
 function smoothCents(previous: number | null, next: number | null): number | null {
@@ -202,15 +228,39 @@ function resetProbe(state: AppState): void {
 }
 
 function latchString(state: AppState, stringId: string, nowMs: number, latchMs: number): void {
+  const previous = state.activeStringId;
   state.activeStringId = stringId;
   state.onsetLatchUntilMs = nowMs + latchMs;
   state.switchLeadFrames = 0;
   resetProbe(state);
   state.mode = "latched";
+  if (previous && previous !== stringId) {
+    const prevState = state.strings[previous];
+    if (prevState) {
+      prevState.lockStartedMs = null;
+      prevState.inToleranceFrames = 0;
+    }
+  }
 }
 
 export function resetForPreset(preset: TuningPreset): AppState {
   return createInitialState(preset);
+}
+
+export function setManualTarget(
+  state: AppState,
+  preset: TuningPreset,
+  stringId: string | null,
+  nowMs: number,
+): void {
+  if (stringId === null) {
+    state.manualTargetStringId = null;
+    return;
+  }
+  const stringDef = preset.strings.find((s) => s.id === stringId);
+  if (!stringDef) return;
+  state.manualTargetStringId = stringId;
+  latchString(state, stringId, nowMs, 200);
 }
 
 export function applyAnalysisFrame(
@@ -240,45 +290,72 @@ export function applyAnalysisFrame(
   state.lastActivityAtMs = nowMs;
   if (state.mode === "idle") state.mode = "probing";
 
+  const transient = frameTransient(frame);
+  const highConfidence = frameHighConfidence(frame);
+
   if (frame.onset && frame.hz > 0 && !state.activeStringId) {
-    const nearest = nearestPresetStringByLogDistance(frame.hz, preset);
+    const target = state.manualTargetStringId
+      ? preset.strings.find((s) => s.id === state.manualTargetStringId)
+      : undefined;
+    const nearest = target ?? nearestPresetStringByLogDistance(frame.hz, preset);
     latchString(state, nearest.id, nowMs, 100);
-  } else if (frame.hz > 0 && !state.activeStringId) {
-    const detected = likelyFrameString(state, preset);
-    if (detected) {
-      if (state.probeStringId === detected.stringDef.id) {
-        state.probeLeadFrames += 1;
-      } else {
-        state.probeStringId = detected.stringDef.id;
-        state.probeLeadFrames = 1;
-      }
-      if (state.probeLeadFrames >= 2) {
-        latchString(state, detected.stringDef.id, nowMs, 80);
-      }
+  } else if (frame.hz > 0 && !state.activeStringId && highConfidence) {
+    // Acquire by probe only when we have high-confidence evidence.
+    if (state.manualTargetStringId) {
+      latchString(state, state.manualTargetStringId, nowMs, 80);
     } else {
-      resetProbe(state);
+      const detected = likelyFrameString(state, preset);
+      if (detected) {
+        if (state.probeStringId === detected.stringDef.id) {
+          state.probeLeadFrames += 1;
+        } else {
+          state.probeStringId = detected.stringDef.id;
+          state.probeLeadFrames = 1;
+        }
+        if (state.probeLeadFrames >= 2) {
+          latchString(state, detected.stringDef.id, nowMs, 80);
+        }
+      } else {
+        resetProbe(state);
+      }
     }
+  } else if (!highConfidence && !state.activeStringId) {
+    // Low-confidence hold: do not probe up from nothing.
+    resetProbe(state);
   }
 
   if (state.activeStringId) {
     const activeState = state.strings[state.activeStringId];
     const activeDef = preset.strings.find((stringDef) => stringDef.id === state.activeStringId);
-    const challenger = bestChallenger(state, preset);
-    const activePitchDistance = candidatePitchDistance(activeState);
+    const targetBias =
+      state.manualTargetStringId && state.manualTargetStringId === state.activeStringId ? 60 : 0;
 
-    if (
-      challenger &&
-      activeDef &&
-      nowMs > state.onsetLatchUntilMs &&
-      (challenger.pitchDistance + 24 <= activePitchDistance ||
-        (activePitchDistance > 80 && challenger.scoreDb >= activeState.scoreDb + challenger.marginDb))
-    ) {
-      state.switchLeadFrames += 1;
-      if (state.switchLeadFrames >= 4) {
-        state.activeStringId = challenger.stringDef.id;
+    // Challenger switching only when frame is stable and high confidence.
+    if (highConfidence && !transient) {
+      const challenger = bestChallenger(state, preset);
+      const activePitchDistance = candidatePitchDistance(activeState);
+
+      if (
+        challenger &&
+        activeDef &&
+        nowMs > state.onsetLatchUntilMs &&
+        (challenger.pitchDistance + 24 + targetBias <= activePitchDistance ||
+          (activePitchDistance > 80 + targetBias &&
+            challenger.scoreDb >= activeState.scoreDb + challenger.marginDb + (targetBias > 0 ? 6 : 0)))
+      ) {
+        state.switchLeadFrames += 1;
+        if (state.switchLeadFrames >= 4) {
+          state.activeStringId = challenger.stringDef.id;
+          state.switchLeadFrames = 0;
+          // Reset lock progress on the previous string.
+          activeState.lockStartedMs = null;
+          activeState.inToleranceFrames = 0;
+        }
+      } else {
         state.switchLeadFrames = 0;
       }
     } else {
+      // Low confidence or transient: hold previous active, no switch.
       state.switchLeadFrames = 0;
     }
 
@@ -286,9 +363,16 @@ export function applyAnalysisFrame(
     const current = state.strings[currentId];
     const displayCentsAbs = Math.abs(current.cents ?? Infinity);
     const inTune = displayCentsAbs <= 7;
-    if (inTune) {
+    const lockEligible = inTune && !transient && highConfidence;
+
+    if (lockEligible) {
       current.lockStartedMs ??= nowMs;
-      if (!current.lockedInThisSession && nowMs - current.lockStartedMs >= TUNE_LOCK_MS) {
+      current.inToleranceFrames += 1;
+      if (
+        !current.lockedInThisSession &&
+        current.inToleranceFrames >= LOCK_STABLE_FRAMES &&
+        nowMs - current.lockStartedMs >= TUNE_LOCK_MS
+      ) {
         current.lockedInThisSession = true;
         current.lockedAtMs = nowMs;
         state.mode = "locked";
@@ -299,8 +383,18 @@ export function applyAnalysisFrame(
         }
         return { lockedStringId: currentId, completed };
       }
+    } else if (transient || !highConfidence) {
+      // Hold lock progress visually but don't advance it; reset stable count on
+      // out-of-tolerance evidence, otherwise just pause.
+      if (!inTune) {
+        current.lockStartedMs = null;
+        current.inToleranceFrames = 0;
+        if (state.completedAtMs === null) state.mode = "latched";
+      }
     } else {
+      // High-confidence, non-transient, out of tolerance: reset lock progress.
       current.lockStartedMs = null;
+      current.inToleranceFrames = 0;
       if (state.completedAtMs === null) {
         state.mode = "latched";
       }

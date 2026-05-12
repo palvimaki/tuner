@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyAnalysisFrame, createInitialState } from "../../src/app/state";
+import { applyAnalysisFrame, createInitialState, setManualTarget } from "../../src/app/state";
 import { guitarPresets } from "../../src/domain/instruments/guitar/presets";
 
 describe("session lock and completion", () => {
@@ -167,6 +167,118 @@ describe("session lock and completion", () => {
 
     expect(effect.lockedStringId).toBeNull();
     expect(state.strings.E4.lockStartedMs).toBe(0);
+  });
+
+  it("requires consecutive stable in-tolerance frames before locking", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "E4";
+    state.mode = "latched";
+    const baseFrame = {
+      hz: 329.628,
+      clarity: 0.97,
+      rmsDb: -16,
+      shortRmsDb: -16,
+      slowRmsDb: -30,
+      onset: false as const,
+      variance: 1e-3,
+      amplitude: 0.2,
+      sampleWindow: 2048 as const,
+      profileScores: {
+        E2: -40,
+        A2: -37,
+        D3: -30,
+        G3: -22,
+        B3: -12,
+        E4: -4,
+      },
+      timestampMs: 0,
+    };
+
+    // Single in-tune frame is not enough even after the lock duration.
+    const onlyOne = applyAnalysisFrame(state, baseFrame, preset, 0);
+    expect(onlyOne.lockedStringId).toBeNull();
+    expect(state.strings.E4.lockedInThisSession).toBe(false);
+
+    // Two frames within the lock window also do not lock yet.
+    const earlySecond = applyAnalysisFrame(state, baseFrame, preset, 200);
+    expect(earlySecond.lockedStringId).toBeNull();
+    expect(state.strings.E4.lockedInThisSession).toBe(false);
+
+    // Third frame past the timing gate locks.
+    const finalEffect = applyAnalysisFrame(state, baseFrame, preset, 1_200);
+    expect(finalEffect.lockedStringId).toBe("E4");
+  });
+
+  it("transient-suppressed frames do not start the lock timer", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "E4";
+    state.mode = "latched";
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: 329.628,
+        clarity: 0.97,
+        rmsDb: -16,
+        shortRmsDb: -16,
+        slowRmsDb: -30,
+        onset: true,
+        variance: 1e-3,
+        amplitude: 0.4,
+        sampleWindow: 2048,
+        profileScores: {
+          E2: -40,
+          A2: -37,
+          D3: -30,
+          G3: -22,
+          B3: -12,
+          E4: -4,
+        },
+        timestampMs: 0,
+        // @ts-expect-error optional richer field
+        transient: true,
+      },
+      preset,
+      0,
+    );
+
+    expect(state.strings.E4.lockStartedMs).toBeNull();
+    expect(state.strings.E4.lockedInThisSession).toBe(false);
+  });
+
+  it("octave-shifted harmonic frames can tune the latched manual target without changing identity", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    setManualTarget(state, preset, "E4", 0);
+
+    const frame = {
+      hz: 659.256,
+      clarity: 0.96,
+      rmsDb: -16,
+      shortRmsDb: -16,
+      slowRmsDb: -30,
+      onset: false as const,
+      variance: 1e-3,
+      amplitude: 0.2,
+      sampleWindow: 2048 as const,
+      profileScores: {
+        E2: -33,
+        A2: -28,
+        D3: -24,
+        G3: -18,
+        B3: -14,
+        E4: -4,
+      },
+      timestampMs: 0,
+    };
+
+    applyAnalysisFrame(state, frame, preset, 250);
+    const effect = applyAnalysisFrame(state, frame, preset, 1_350);
+
+    expect(state.activeStringId).toBe("E4");
+    expect(effect.lockedStringId).toBe("E4");
   });
 
   it("fires completion once the last string locks", () => {

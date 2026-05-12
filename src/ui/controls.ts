@@ -2,14 +2,18 @@ import type { TuningPreset } from "../domain/instrument";
 import type { RenderString } from "./scene";
 
 function presetGlyph(preset: TuningPreset): HTMLSpanElement {
-  const baseMidi = preset.strings[0]?.midi ?? 0;
+  const midis = preset.strings.map((stringDef) => stringDef.midi);
+  const minMidi = Math.min(...midis);
+  const maxMidi = Math.max(...midis);
+  const span = Math.max(1, maxMidi - minMidi);
   const lines = document.createElement("span");
   lines.className = "preset-lines";
 
   preset.strings.forEach((stringDef) => {
     const line = document.createElement("span");
     line.className = "preset-line";
-    line.style.setProperty("--preset-line-h", `${10 + (stringDef.midi - baseMidi) * 1.5}px`);
+    const heightPx = 6 + ((stringDef.midi - minMidi) / span) * 14;
+    line.style.setProperty("--preset-line-h", `${heightPx}px`);
     lines.appendChild(line);
   });
 
@@ -37,7 +41,12 @@ export function createControls(options: ControlsOptions): ControlsHandle {
 
   const brand = document.createElement("div");
   brand.className = "brand-mark";
-  brand.setAttribute("aria-hidden", "true");
+  brand.setAttribute("aria-label", "tuner.fi");
+  brand.setAttribute("role", "img");
+  const brandText = document.createElement("span");
+  brandText.className = "brand-mark-text";
+  brandText.textContent = "t";
+  brand.appendChild(brandText);
 
   const labelRail = document.createElement("div");
   labelRail.className = "string-labels";
@@ -64,6 +73,10 @@ export function createControls(options: ControlsOptions): ControlsHandle {
     button.dataset.presetId = preset.id;
     if (preset.id === options.activePresetId) button.dataset.active = "1";
     button.appendChild(presetGlyph(preset));
+    const name = document.createElement("span");
+    name.className = "preset-name";
+    name.textContent = preset.name;
+    button.appendChild(name);
     button.addEventListener("click", () => {
       options.onSelect(preset.id);
       panel.hidden = true;

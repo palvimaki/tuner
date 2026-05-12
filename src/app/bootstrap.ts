@@ -22,8 +22,15 @@ function buildGlassVeil(): HTMLDivElement {
   veil.className = "glass-veil";
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "glass-button";
+  button.className = "mic-button";
   button.setAttribute("aria-label", "Enable microphone");
+  const capsule = document.createElement("span");
+  capsule.className = "mic-capsule";
+  const stand = document.createElement("span");
+  stand.className = "mic-stand";
+  const base = document.createElement("span");
+  base.className = "mic-base";
+  button.append(capsule, stand, base);
   veil.appendChild(button);
   return veil;
 }

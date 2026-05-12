@@ -8,8 +8,9 @@ import {
   markControlsOpened,
   markMicGranted,
 } from "./session";
-import { applyAnalysisFrame, createInitialState, resetForPreset } from "./state";
+import { applyAnalysisFrame, createInitialState, resetForPreset, setManualTarget } from "./state";
 import { getPresetById } from "../domain/tuning";
+import { resolveStringTargetHz } from "../domain/instrument";
 import { createControls } from "../ui/controls";
 import { createFallbackGlyph } from "../ui/fallback-glyph";
 import { Renderer } from "../ui/renderer";
@@ -36,7 +37,7 @@ function buildGlassVeil(): HTMLDivElement {
 }
 
 function targetsForPreset(preset: ReturnType<typeof getPresetById>): AnalysisTarget[] {
-  return preset.strings.map((stringDef) => ({ id: stringDef.id, hz: stringDef.hz }));
+  return preset.strings.map((stringDef) => ({ id: stringDef.id, hz: resolveStringTargetHz(stringDef) }));
 }
 
 export async function bootstrapApp(root: HTMLElement): Promise<void> {
@@ -135,14 +136,15 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
   }
 
   canvas.addEventListener("pointerdown", (event) => {
-    if (state.activeStringId) {
-      engine.playReference(state.activeStringId);
-      return;
-    }
     const rect = canvas.getBoundingClientRect();
     const ratio = (event.clientX - rect.left) / rect.width;
     const index = Math.max(0, Math.min(preset.strings.length - 1, Math.round(ratio * (preset.strings.length - 1))));
-    engine.playReference(preset.strings[index]?.id ?? preset.strings[0].id);
+    const targetStringId = preset.strings[index]?.id ?? preset.strings[0].id;
+    setManualTarget(state, preset, targetStringId, performance.now());
+    engine.playReference(targetStringId);
+    const renderState = buildRenderState(state, preset, !fallback.hidden, !hasOpenedControls(), performance.now());
+    controls.setStringLabels(renderState.strings);
+    renderer.setState(renderState);
   });
 
   document.addEventListener("visibilitychange", () => {

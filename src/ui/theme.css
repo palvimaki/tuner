@@ -54,7 +54,6 @@ button {
 .picker-toggle,
 .preset-panel,
 .preset-button,
-.glass-veil,
 .mic-button,
 .fallback-glyph {
   pointer-events: auto;
@@ -78,7 +77,8 @@ button {
   font-size: clamp(17px, 4.2vw, 24px);
   font-weight: 400;
   letter-spacing: 0;
-  color: rgba(245, 229, 191, 0.62);
+  color: rgba(245, 229, 191, 0.78);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.42);
   transition:
     color 160ms ease,
     opacity 160ms ease;
@@ -244,6 +244,7 @@ button {
   inset: 0;
   display: grid;
   place-items: center;
+  pointer-events: none;
   background: rgba(10, 7, 7, 0.26);
   backdrop-filter: blur(10px);
 }

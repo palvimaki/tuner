@@ -28,10 +28,6 @@ export function computeStringXs(width: number, count: number): number[] {
   return Array.from({ length: count }, (_, index) => padding + (usable * index) / (count - 1));
 }
 
-function displayLabel(noteId: string): string {
-  return noteId;
-}
-
 export function buildRenderState(
   state: AppState,
   preset: TuningPreset,
@@ -60,7 +56,7 @@ export function buildRenderState(
           : Math.max(0, Math.min(1, 1 - (nowMs - stringState.lockedAtMs) / 900));
       return {
         id: stringDef.id,
-        label: displayLabel(stringDef.id),
+        label: stringDef.displayLabel ?? stringDef.id,
         active: state.activeStringId === stringDef.id,
         locked: stringState.lockedInThisSession,
         inTune,

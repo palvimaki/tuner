@@ -1,6 +1,6 @@
 import type { AnalysisFrame } from "../audio/frame-protocol";
 import { absoluteLogDistance, centsFromHz } from "../audio/note-math";
-import type { InstrumentString, TuningPreset } from "../domain/instrument";
+import { resolveStringTargetHz, type InstrumentString, type TuningPreset } from "../domain/instrument";
 
 export type TunerMode = "idle" | "probing" | "latched" | "locked" | "completed";
 export const TUNE_LOCK_MS = 1_000;
@@ -40,10 +40,7 @@ export interface FrameEffects {
   completed: boolean;
 }
 
-type RichFrame = AnalysisFrame & {
-  transient?: boolean;
-  confidence?: number;
-};
+type LegacyTransientFrame = AnalysisFrame & { transient?: boolean };
 
 export function createInitialState(preset: TuningPreset): AppState {
   return {
@@ -112,7 +109,10 @@ export function nearestPresetStringByLogDistance(
   preset: TuningPreset,
 ): InstrumentString {
   return preset.strings.reduce((best, candidate) =>
-    absoluteLogDistance(hz, candidate.hz) < absoluteLogDistance(hz, best.hz) ? candidate : best,
+    absoluteLogDistance(hz, resolveStringTargetHz(candidate)) <
+    absoluteLogDistance(hz, resolveStringTargetHz(best))
+      ? candidate
+      : best,
   );
 }
 
@@ -121,17 +121,20 @@ function frameAdmitted(frame: AnalysisFrame): boolean {
 }
 
 function frameTransient(frame: AnalysisFrame): boolean {
-  const rich = frame as RichFrame;
-  if (rich.transient === true) return true;
-  return frame.onset === true;
+  const legacy = frame as LegacyTransientFrame;
+  return frame.onset === true || frame.transientSuppressed === true || legacy.transient === true;
 }
 
 function frameHighConfidence(frame: AnalysisFrame): boolean {
-  const rich = frame as RichFrame;
-  if (typeof rich.confidence === "number") {
-    return rich.confidence >= 0.7;
+  if (frame.lowConfidence === true) return false;
+  if (typeof frame.confidence === "number") {
+    return frame.confidence >= 0.7;
   }
   return frame.clarity >= HIGH_CONFIDENCE_CLARITY && frame.rmsDb >= HIGH_CONFIDENCE_RMS_DB;
+}
+
+function frameStableTail(frame: AnalysisFrame): boolean {
+  return typeof frame.stableTail === "boolean" ? frame.stableTail : true;
 }
 
 function smoothCents(previous: number | null, next: number | null): number | null {
@@ -144,7 +147,7 @@ function hydrateFrameIntoStrings(state: AppState, frame: AnalysisFrame, preset: 
   for (const stringDef of preset.strings) {
     const targetState = state.strings[stringDef.id];
     if (frame.hz > 0) {
-      const tuningCents = tuningCentsFromHz(frame.hz, stringDef.hz);
+      const tuningCents = tuningCentsFromHz(frame.hz, resolveStringTargetHz(stringDef));
       targetState.rawCents = tuningCents.rawCents;
       targetState.pitchPenaltyCents = tuningCents.penalty;
       targetState.cents = smoothCents(targetState.cents, tuningCents.cents);
@@ -292,6 +295,7 @@ export function applyAnalysisFrame(
 
   const transient = frameTransient(frame);
   const highConfidence = frameHighConfidence(frame);
+  const stableTail = frameStableTail(frame);
 
   if (frame.onset && frame.hz > 0 && !state.activeStringId) {
     const target = state.manualTargetStringId
@@ -363,7 +367,7 @@ export function applyAnalysisFrame(
     const current = state.strings[currentId];
     const displayCentsAbs = Math.abs(current.cents ?? Infinity);
     const inTune = displayCentsAbs <= 7;
-    const lockEligible = inTune && !transient && highConfidence;
+    const lockEligible = inTune && !transient && highConfidence && stableTail;
 
     if (lockEligible) {
       current.lockStartedMs ??= nowMs;

@@ -11,7 +11,6 @@ describe("guitar preset metadata", () => {
         expect(typeof s.id).toBe("string");
         expect(typeof s.midi).toBe("number");
         expect(typeof s.hz).toBe("number");
-        expect(s.sampleId).toBe(s.id);
         expect(typeof s.displayLabel).toBe("string");
         expect(s.displayLabel).toBe(s.id);
         expect(typeof s.targetHz).toBe("number");

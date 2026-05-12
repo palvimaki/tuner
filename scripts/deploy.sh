@@ -34,11 +34,11 @@ npm run test
 npm run build
 
 if [[ "${1:-}" == "--dry-run" ]]; then
-  rsync -az --delete --dry-run dist/ haukka:/var/www/tuner.fi/
+  rsync -az --delete --exclude '.DS_Store' --dry-run dist/ haukka:/var/www/tuner.fi/
   exit 0
 fi
 
-rsync -az --delete dist/ haukka:/var/www/tuner.fi/
+rsync -az --delete --exclude '.DS_Store' dist/ haukka:/var/www/tuner.fi/
 curl -fsS https://tuner.fi/ >/dev/null
 
 hashed_js_path="$(
@@ -52,16 +52,10 @@ hashed_js_path="$(
     process.stdout.write(`/${file}`);
   '
 )"
-audio_path="/$(find dist/audio -type f -name '*.m4a' | sort | head -n 1 | sed 's#^dist/##')"
-
-if [[ "$audio_path" == "/" ]]; then
-  echo "Could not locate a built audio asset in dist/audio" >&2
-  exit 1
-fi
 
 assert_content_type "https://tuner.fi/sw.js" "javascript"
 assert_content_type "https://tuner.fi${hashed_js_path}" "javascript"
-assert_content_type "https://tuner.fi${audio_path}" "audio/"
+assert_status "https://tuner.fi/audio/guitar/E2.m4a" "404"
 assert_status "https://tuner.fi/assets/does-not-exist.js" "404"
 assert_status "https://tuner.fi/.env" "404"
 assert_status "https://tuner.fi/.DS_Store" "404"

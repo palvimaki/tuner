@@ -5,7 +5,6 @@ const ROOT = process.cwd();
 const PUBLIC_VERSION_PATH = join(ROOT, "public", "version.json");
 const DIST_SW_PATH = join(ROOT, "dist", "sw.js");
 const MANIFEST_PATH = join(ROOT, "dist", ".vite", "manifest.json");
-const SAMPLES_VERSION = "1";
 
 const pkg = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8"));
 const appVersion = pkg.version;
@@ -19,7 +18,6 @@ if (mode === "prebuild") {
     JSON.stringify(
       {
         appVersion,
-        samplesVersion: SAMPLES_VERSION,
         buildTime,
       },
       null,
@@ -44,6 +42,9 @@ if (mode === "postbuild") {
     "/app/",
     "/version.json",
     "/app.webmanifest",
+    "/icons/favicon-16.png",
+    "/icons/favicon-32.png",
+    "/icons/apple-touch-icon.png",
     "/icons/icon-192.png",
     "/icons/icon-512.png",
     "/icons/maskable-512.png",
@@ -54,7 +55,6 @@ if (mode === "postbuild") {
   const source = await readFile(DIST_SW_PATH, "utf8");
   const next = source
     .replace(/__APP_VERSION__/g, appVersion)
-    .replace(/__SAMPLES_VERSION__/g, SAMPLES_VERSION)
     .replace("__SHELL_ASSETS__", JSON.stringify(shellAssets, null, 2));
   await writeFile(DIST_SW_PATH, next);
 }

@@ -1,7 +1,6 @@
 import type { Instrument } from "../domain/instrument";
 import type { AnalysisFrame, AnalysisTarget } from "./frame-protocol";
 import type { VersionInfo } from "../pwa/version";
-import { SamplePlayer } from "./sample-player";
 
 interface LiveInputWaitOptions {
   timeoutMs: number;
@@ -17,7 +16,6 @@ export class AudioEngine {
   private sourceNode: MediaStreamAudioSourceNode | null = null;
   private silentGain: GainNode | null = null;
   private stream: MediaStream | null = null;
-  private samplePlayer: SamplePlayer | null = null;
   private readonly listeners = new Set<FrameListener>();
 
   constructor(
@@ -61,10 +59,6 @@ export class AudioEngine {
       this.silentGain = this.context.createGain();
       this.silentGain.gain.value = 0;
       this.processor.connect(this.silentGain).connect(this.context.destination);
-    }
-    if (!this.samplePlayer) {
-      this.samplePlayer = new SamplePlayer(this.context, this.instrument.sampleMap);
-      await this.samplePlayer.load();
     }
     if (!this.stream) {
       this.stream = await navigator.mediaDevices.getUserMedia({
@@ -116,17 +110,5 @@ export class AudioEngine {
 
   async resume(): Promise<void> {
     await this.context?.resume();
-  }
-
-  playReference(noteName: string, frequency?: number): void {
-    this.samplePlayer?.playReference(noteName, frequency);
-  }
-
-  playLockPing(): void {
-    this.samplePlayer?.playLockPing();
-  }
-
-  playCompletionStrum(preset: Parameters<SamplePlayer["playCompletionStrum"]>[0]): void {
-    this.samplePlayer?.playCompletionStrum(preset);
   }
 }

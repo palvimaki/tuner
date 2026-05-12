@@ -1,7 +1,5 @@
 const VERSION = "__APP_VERSION__";
-const SAMPLES_VERSION = "__SAMPLES_VERSION__";
 const SHELL_CACHE = `tuner-shell-${VERSION}`;
-const AUDIO_CACHE = `tuner-audio-${SAMPLES_VERSION}`;
 const SHELL_ASSETS = __SHELL_ASSETS__;
 
 self.addEventListener("install", (event) => {
@@ -15,7 +13,7 @@ self.addEventListener("activate", (event) => {
       const keys = await caches.keys();
       await Promise.all(
         keys
-          .filter((key) => key !== SHELL_CACHE && key !== AUDIO_CACHE)
+          .filter((key) => key !== SHELL_CACHE)
           .map((key) => caches.delete(key)),
       );
       await self.clients.claim();
@@ -40,12 +38,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (url.pathname.startsWith("/audio/")) {
-    event.respondWith(cacheFirst(request, AUDIO_CACHE));
-    return;
-  }
-
-  if (url.pathname.startsWith("/assets/") || url.pathname.startsWith("/worklets/")) {
+  if (url.pathname.startsWith("/assets/") || url.pathname.startsWith("/icons/") || url.pathname.startsWith("/worklets/")) {
     event.respondWith(cacheFirst(request, SHELL_CACHE));
   }
 });

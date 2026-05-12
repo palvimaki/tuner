@@ -16,7 +16,7 @@
     "pwa",
     "audio"
   ],
-  "author": "TARS",
+  "author": "tuner.fi contributors",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^25.6.2",

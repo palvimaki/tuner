@@ -25,7 +25,7 @@ export interface ControlsOptions {
   activePresetId: string;
   installPulse: boolean;
   pulse: boolean;
-  onInstallDismiss?(): void;
+  onInstallOpenOnce?(): void;
   onSelect(presetId: string): void;
   onOpenOnce?(): void;
 }
@@ -76,6 +76,7 @@ export function createControls(options: ControlsOptions): ControlsHandle {
   installPanel.setAttribute("role", "dialog");
   installPanel.setAttribute("aria-labelledby", "install-panel-title");
   installPanel.hidden = true;
+  let installOpenedOnce = !options.installPulse;
 
   const installHeader = document.createElement("div");
   installHeader.className = "install-header";
@@ -151,7 +152,6 @@ export function createControls(options: ControlsOptions): ControlsHandle {
   const dismissInstallPanel = (): void => {
     installPanel.hidden = true;
     brand.setAttribute("aria-expanded", "false");
-    options.onInstallDismiss?.();
   };
 
   brand.addEventListener("click", () => {
@@ -162,6 +162,10 @@ export function createControls(options: ControlsOptions): ControlsHandle {
     installPanel.hidden = false;
     brand.setAttribute("aria-expanded", "true");
     panel.hidden = true;
+    if (!installOpenedOnce) {
+      installOpenedOnce = true;
+      options.onInstallOpenOnce?.();
+    }
   });
 
   closeInstall.addEventListener("click", () => {

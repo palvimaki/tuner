@@ -4,10 +4,10 @@ import { instrumentRegistry } from "./registry";
 import { isStandaloneMode, openBrowserEscape } from "./routing";
 import {
   hasKnownMicGrant,
-  hasDismissedInstallHint,
+  hasOpenedInstallHint,
   hasOpenedControls,
   markControlsOpened,
-  markInstallHintDismissed,
+  markInstallHintOpened,
   markMicGranted,
 } from "./session";
 import { applyAnalysisFrame, createInitialState, resetForPreset, setManualTarget } from "./state";
@@ -63,10 +63,10 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
   const controls = createControls({
     presets: instrument.presets,
     activePresetId: preset.id,
-    installPulse: !hasDismissedInstallHint(),
+    installPulse: !hasOpenedInstallHint(),
     pulse: !hasOpenedControls(),
-    onInstallDismiss() {
-      markInstallHintDismissed();
+    onInstallOpenOnce() {
+      markInstallHintOpened();
       controls.setInstallPulse(false);
     },
     onOpenOnce() {

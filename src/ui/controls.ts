@@ -106,6 +106,8 @@ export function createControls(options: ControlsOptions): ControlsHandle {
       label.textContent = stringState.label;
       if (stringState.active) label.dataset.active = "1";
       else delete label.dataset.active;
+      if (stringState.inTune) label.dataset.inTune = "1";
+      else delete label.dataset.inTune;
       if (stringState.locked) label.dataset.locked = "1";
       else delete label.dataset.locked;
     });

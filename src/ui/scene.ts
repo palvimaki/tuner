@@ -1,4 +1,5 @@
 import type { AppState } from "../app/state";
+import { TUNE_LOCK_MS } from "../app/state";
 import type { TuningPreset } from "../domain/instrument";
 
 export interface RenderString {
@@ -6,6 +7,9 @@ export interface RenderString {
   label: string;
   active: boolean;
   locked: boolean;
+  inTune: boolean;
+  lockProgress: number;
+  donePulse: number;
   amplitude: number;
   cents: number | null;
 }
@@ -25,8 +29,7 @@ export function computeStringXs(width: number, count: number): number[] {
 }
 
 function displayLabel(noteId: string): string {
-  const match = noteId.match(/[A-G]/i);
-  return match ? match[0].toUpperCase() : noteId.slice(0, 1).toUpperCase();
+  return noteId;
 }
 
 export function buildRenderState(
@@ -46,11 +49,23 @@ export function buildRenderState(
     celebrationProgress,
     strings: preset.strings.map((stringDef) => {
       const stringState = state.strings[stringDef.id];
+      const inTune = stringState.lockStartedMs !== null || stringState.lockedInThisSession;
+      const lockProgress =
+        stringState.lockStartedMs === null
+          ? 0
+          : Math.max(0, Math.min(1, (nowMs - stringState.lockStartedMs) / TUNE_LOCK_MS));
+      const donePulse =
+        stringState.lockedAtMs === null
+          ? 0
+          : Math.max(0, Math.min(1, 1 - (nowMs - stringState.lockedAtMs) / 900));
       return {
         id: stringDef.id,
         label: displayLabel(stringDef.id),
         active: state.activeStringId === stringDef.id,
         locked: stringState.lockedInThisSession,
+        inTune,
+        lockProgress,
+        donePulse,
         amplitude: stringState.amplitude,
         cents: stringState.cents,
       };

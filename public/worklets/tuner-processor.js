@@ -7,9 +7,8 @@
  */
 
 const YIN_THRESHOLD = 0.15;
-const YIN_MIN_HZ = 40;
+const YIN_MIN_HZ = 55;
 const YIN_MAX_HZ = 1400;
-const HIGH_PASS_POLE = 0.996;
 const TRANSIENT_SUPPRESS_MS = 120;
 const STABLE_TAIL_CENTS = 25;
 const STABLE_TAIL_FRAMES = 3;
@@ -255,7 +254,7 @@ class TunerProcessor extends AudioWorkletProcessor {
     if (!input) return true;
 
     for (let i = 0; i < input.length; i += 1) {
-      const hp = input[i] - this.hpPrevInput + HIGH_PASS_POLE * this.hpState;
+      const hp = input[i] - this.hpPrevInput + 0.992 * this.hpState;
       this.hpPrevInput = input[i];
       this.hpState = hp;
       this.lpState = this.lpState + 0.4 * (hp - this.lpState);

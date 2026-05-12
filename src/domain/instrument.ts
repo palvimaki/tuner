@@ -6,6 +6,11 @@ export interface InstrumentString {
   midi: number;
   hz: number;
   sampleId: string;
+  // Optional, additive metadata. Existing consumers ignore these freely.
+  targetHz?: number;
+  displayLabel?: string;
+  centOffset?: number;
+  gaugeHint?: string;
 }
 
 export interface TuningPreset {

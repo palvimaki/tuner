@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import { applyAnalysisFrame, createInitialState, setManualTarget } from "../../src/app/state";
 import { guitarPresets } from "../../src/domain/instruments/guitar/presets";
 
+function hzAtCents(targetHz: number, cents: number): number {
+  return targetHz * 2 ** (cents / 1200);
+}
+
 describe("session lock and completion", () => {
   it("locks a string after 1.5 seconds in tune", () => {
     const preset = guitarPresets[0];
@@ -98,6 +102,88 @@ describe("session lock and completion", () => {
 
     expect(effect.lockedStringId).toBe("E4");
     expect(state.strings.E4.lockedInThisSession).toBe(true);
+  });
+
+  it("lets low E settle through realistic low-string cents drift", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "E2";
+    state.mode = "latched";
+    const targetHz = 82.4069;
+    const frame = {
+      clarity: 0.98,
+      confidence: 0.94,
+      rmsDb: -17,
+      shortRmsDb: -17,
+      slowRmsDb: -30,
+      onset: false,
+      variance: 1e-3,
+      amplitude: 0.2,
+      sampleWindow: 4096 as const,
+      profileScores: {
+        E2: -6,
+        A2: -21,
+        D3: -27,
+        G3: -31,
+        B3: -35,
+        E4: -40,
+      },
+      stableTail: true,
+      timestampMs: 0,
+    };
+
+    applyAnalysisFrame(state, { ...frame, hz: hzAtCents(targetHz, 10.5) }, preset, 0);
+    applyAnalysisFrame(state, { ...frame, hz: hzAtCents(targetHz, 9.8) }, preset, 520);
+    const effect = applyAnalysisFrame(
+      state,
+      { ...frame, hz: hzAtCents(targetHz, 10.2) },
+      preset,
+      1_080,
+    );
+
+    expect(effect.lockedStringId).toBe("E2");
+    expect(state.strings.E2.lockedInThisSession).toBe(true);
+  });
+
+  it("keeps the tighter settle gate on high E", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "E4";
+    state.mode = "latched";
+    const targetHz = 329.628;
+    const frame = {
+      clarity: 0.98,
+      confidence: 0.94,
+      rmsDb: -17,
+      shortRmsDb: -17,
+      slowRmsDb: -30,
+      onset: false,
+      variance: 1e-3,
+      amplitude: 0.2,
+      sampleWindow: 2048 as const,
+      profileScores: {
+        E2: -40,
+        A2: -37,
+        D3: -30,
+        G3: -22,
+        B3: -12,
+        E4: -4,
+      },
+      stableTail: true,
+      timestampMs: 0,
+    };
+
+    applyAnalysisFrame(state, { ...frame, hz: hzAtCents(targetHz, 10.5) }, preset, 0);
+    applyAnalysisFrame(state, { ...frame, hz: hzAtCents(targetHz, 9.8) }, preset, 520);
+    const effect = applyAnalysisFrame(
+      state,
+      { ...frame, hz: hzAtCents(targetHz, 10.2) },
+      preset,
+      1_080,
+    );
+
+    expect(effect.lockedStringId).toBeNull();
+    expect(state.strings.E4.lockedInThisSession).toBe(false);
   });
 
   it("locks high E when pitch frames are octave-shifted harmonics", () => {

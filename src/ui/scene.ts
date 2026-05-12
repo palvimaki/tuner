@@ -28,6 +28,17 @@ export function computeStringXs(width: number, count: number): number[] {
   return Array.from({ length: count }, (_, index) => padding + (usable * index) / (count - 1));
 }
 
+export function nearestStringIndexFromX(width: number, count: number, x: number): number {
+  if (count <= 1) return 0;
+  const xs = computeStringXs(width, count);
+  const clampedX = Math.max(0, Math.min(width, x));
+  return xs.reduce(
+    (bestIndex, stringX, index) =>
+      Math.abs(stringX - clampedX) < Math.abs(xs[bestIndex] - clampedX) ? index : bestIndex,
+    0,
+  );
+}
+
 export function buildRenderState(
   state: AppState,
   preset: TuningPreset,

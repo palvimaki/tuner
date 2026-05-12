@@ -4,8 +4,10 @@ import { instrumentRegistry } from "./registry";
 import { isStandaloneMode, openBrowserEscape } from "./routing";
 import {
   hasKnownMicGrant,
+  hasDismissedInstallHint,
   hasOpenedControls,
   markControlsOpened,
+  markInstallHintDismissed,
   markMicGranted,
 } from "./session";
 import { applyAnalysisFrame, createInitialState, resetForPreset, setManualTarget } from "./state";
@@ -14,7 +16,7 @@ import { resolveStringTargetHz } from "../domain/instrument";
 import { createControls } from "../ui/controls";
 import { createFallbackGlyph } from "../ui/fallback-glyph";
 import { Renderer } from "../ui/renderer";
-import { buildRenderState } from "../ui/scene";
+import { buildRenderState, nearestStringIndexFromX } from "../ui/scene";
 import { requestWakeLock, releaseWakeLock } from "../pwa/wake-lock";
 import { loadVersionInfo, registerServiceWorker } from "../pwa/version";
 
@@ -61,7 +63,12 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
   const controls = createControls({
     presets: instrument.presets,
     activePresetId: preset.id,
+    installPulse: !hasDismissedInstallHint(),
     pulse: !hasOpenedControls(),
+    onInstallDismiss() {
+      markInstallHintDismissed();
+      controls.setInstallPulse(false);
+    },
     onOpenOnce() {
       markControlsOpened();
       controls.setPulse(false);
@@ -137,8 +144,7 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
 
   canvas.addEventListener("pointerdown", (event) => {
     const rect = canvas.getBoundingClientRect();
-    const ratio = (event.clientX - rect.left) / rect.width;
-    const index = Math.max(0, Math.min(preset.strings.length - 1, Math.round(ratio * (preset.strings.length - 1))));
+    const index = nearestStringIndexFromX(rect.width, preset.strings.length, event.clientX - rect.left);
     const targetString = preset.strings[index] ?? preset.strings[0];
     const targetStringId = targetString.id;
     setManualTarget(state, preset, targetStringId, performance.now());

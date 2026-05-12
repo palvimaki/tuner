@@ -19,6 +19,19 @@ function lowerSameNoteFrequencies(stringDef: InstrumentString, preset: TuningPre
     .map((candidate) => candidate.hz);
 }
 
+function lowerSameNotePenaltyDb(
+  signal: ArrayLike<number>,
+  sampleRate: number,
+  stringDef: InstrumentString,
+  preset: TuningPreset,
+): number {
+  const lowerFrequencies = lowerSameNoteFrequencies(stringDef, preset);
+  if (lowerFrequencies.length === 0) return 0;
+  return lowerFrequencies
+    .map((hz) => bandDb(signal, sampleRate, hz))
+    .reduce((max, value) => Math.max(max, value), -120);
+}
+
 export function scoreStringProfile(
   signal: ArrayLike<number>,
   sampleRate: number,
@@ -29,9 +42,7 @@ export function scoreStringProfile(
   const second = bandDb(signal, sampleRate, stringDef.hz * 2);
   const third = bandDb(signal, sampleRate, stringDef.hz * 3);
   const fourth = bandDb(signal, sampleRate, stringDef.hz * 4);
-  const penalty = lowerSameNoteFrequencies(stringDef, preset)
-    .map((hz) => bandDb(signal, sampleRate, hz))
-    .reduce((max, value) => Math.max(max, value), -120);
+  const penalty = lowerSameNotePenaltyDb(signal, sampleRate, stringDef, preset);
   const missingFundamentalPenalty = Math.max(0, second - fundamental);
   const upperOctavePenalty = Math.max(0, fourth - second);
 

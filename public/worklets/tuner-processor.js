@@ -172,9 +172,12 @@ class TunerProcessor extends AudioWorkletProcessor {
         .filter((candidate) => candidate.id !== target.id)
         .filter((candidate) => candidate.id.slice(0, -1) === target.id.slice(0, -1))
         .filter((candidate) => candidate.hz < target.hz);
-      const penalty = lowerSameNoteTargets.reduce((max, candidate) => {
-        return Math.max(max, bandDb(signal, sampleRate, candidate.hz));
-      }, -120);
+      const penalty =
+        lowerSameNoteTargets.length === 0
+          ? 0
+          : lowerSameNoteTargets.reduce((max, candidate) => {
+              return Math.max(max, bandDb(signal, sampleRate, candidate.hz));
+            }, -120);
       const fundamental = bandDb(signal, sampleRate, target.hz);
       const second = bandDb(signal, sampleRate, target.hz * 2);
       const third = bandDb(signal, sampleRate, target.hz * 3);

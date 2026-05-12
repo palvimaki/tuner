@@ -87,17 +87,23 @@ export class SamplePlayer {
   }
 
   playLockPing(): void {
-    const oscillator = this.context.createOscillator();
-    const gain = this.context.createGain();
-    oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(1046.5, this.context.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(1567.98, this.context.currentTime + 0.16);
-    gain.gain.setValueAtTime(0.0001, this.context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.08, this.context.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, this.context.currentTime + 0.24);
-    oscillator.connect(gain).connect(this.context.destination);
-    oscillator.start();
-    oscillator.stop(this.context.currentTime + 0.26);
+    const now = this.context.currentTime;
+    [
+      { hz: 1046.5, start: 0, duration: 0.18, gain: 0.09 },
+      { hz: 1318.51, start: 0.08, duration: 0.22, gain: 0.075 },
+    ].forEach((tone) => {
+      const oscillator = this.context.createOscillator();
+      const gain = this.context.createGain();
+      const start = now + tone.start;
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(tone.hz, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(tone.gain, start + 0.018);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + tone.duration);
+      oscillator.connect(gain).connect(this.context.destination);
+      oscillator.start(start);
+      oscillator.stop(start + tone.duration + 0.02);
+    });
   }
 
   playCompletionStrum(preset: TuningPreset): void {

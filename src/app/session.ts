@@ -1,4 +1,4 @@
-export const FIRST_OPEN_KEY = "tuner:first-opened";
+export const FIRST_OPEN_KEY = "tuner:tuning-selector-opened";
 export const MIC_GRANTED_KEY = "tuner:mic-granted";
 export const INSTALL_HINT_DISMISSED_KEY = "tuner:install-hint-dismissed";
 

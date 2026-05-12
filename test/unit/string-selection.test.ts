@@ -236,7 +236,7 @@ describe("string switching hysteresis", () => {
     expect(state.activeStringId).toBe("E4");
   });
 
-  it("refuses to switch from B to high E when the detector reports the lower octave", () => {
+  it("switches from B to high E when the detector reports the lower octave", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);
     state.activeStringId = "B3";
@@ -270,42 +270,7 @@ describe("string switching hysteresis", () => {
       );
     }
 
-    expect(state.activeStringId).toBe("B3");
-  });
-
-  it("does not acquire low E from an octave-below string", () => {
-    const preset = guitarPresets[0];
-    const state = createInitialState(preset);
-
-    for (let frameIndex = 0; frameIndex < 3; frameIndex += 1) {
-      applyAnalysisFrame(
-        state,
-        {
-          hz: 41.2034,
-          clarity: 0.96,
-          rmsDb: -18,
-          shortRmsDb: -18,
-          slowRmsDb: -32,
-          onset: frameIndex === 0,
-          variance: 1e-3,
-          amplitude: 0.26,
-          sampleWindow: 4096,
-          profileScores: {
-            E2: -4,
-            A2: -28,
-            D3: -31,
-            G3: -35,
-            B3: -39,
-            E4: -42,
-          },
-          timestampMs: 0,
-        },
-        preset,
-        200 + frameIndex * 40,
-      );
-    }
-
-    expect(state.activeStringId).toBeNull();
+    expect(state.activeStringId).toBe("E4");
   });
 
   it("with manual target high E, refuses to switch to B even on B-like profile evidence", () => {

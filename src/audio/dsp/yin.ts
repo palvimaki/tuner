@@ -12,7 +12,7 @@ export interface YinOptions {
 }
 
 const DEFAULT_THRESHOLD = 0.15;
-const DEFAULT_MIN_HZ = 40;
+const DEFAULT_MIN_HZ = 55;
 const DEFAULT_MAX_HZ = 1400;
 
 function parabolicTau(d: ArrayLike<number>, tau: number): number {

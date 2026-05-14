@@ -92,6 +92,68 @@ describe("production worklet frame contract", () => {
     expect(Math.abs((last?.rawHz ?? 0) - E4_HZ * 2)).toBeLessThan(1.5);
   });
 
+  it("does not mark corrected frames stable while raw detector octaves alternate", () => {
+    let ProcessorClass!: new (options: unknown) => {
+      process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean;
+    };
+    const posted: unknown[] = [];
+    const context = {
+      console,
+      sampleRate: SAMPLE_RATE,
+      currentTime: 0,
+      AudioWorkletProcessor: class {
+        port = { postMessage: (message: unknown) => posted.push(message), onmessage: null };
+      },
+      registerProcessor: (_name: string, cls: typeof ProcessorClass) => {
+        ProcessorClass = cls;
+      },
+    };
+    vm.createContext(context);
+    vm.runInContext(readFileSync("public/worklets/tuner-processor.js", "utf8"), context);
+
+    const cmnd = makeCmndWithMinimum(E4_HZ);
+    let calls = 0;
+    (context as typeof context & { findPitchYIN: unknown }).findPitchYIN = () => {
+      const frameIndex = Math.floor(calls / 2);
+      calls += 1;
+      return {
+        hz: frameIndex % 2 === 0 ? E4_HZ : E4_HZ * 2,
+        confidence: 0.96,
+        cmndAtTau: 0.04,
+        cmnd,
+      };
+    };
+
+    const targets = [
+      ["E2", 82.4069],
+      ["A2", 110],
+      ["D3", 146.8324],
+      ["G3", 195.9977],
+      ["B3", B3_HZ],
+      ["E4", E4_HZ],
+    ].map(([id, hz]) => ({ id, hz }));
+    const processor = new ProcessorClass({
+      processorOptions: { targets, onsetThresholdDb: 8, onsetDebounceMs: 140 },
+    });
+    const signal = makePluck(E4_HZ, 1.2, [0.42, 1, 0.78, 0.55, 0.34]);
+    const output = new Float32Array(128);
+
+    for (let offset = 0; offset + 128 <= signal.length; offset += 128) {
+      context.currentTime = offset / SAMPLE_RATE;
+      processor.process([[signal.slice(offset, offset + 128)]], [[output]]);
+    }
+
+    const stableFrames = posted
+      .map((frame) => frame as { hz: number; rawHz: number; stableTail?: boolean; debug?: { targetStringId?: string } })
+      .filter((frame) => frame.stableTail);
+    const correctedFrames = posted
+      .map((frame) => frame as { hz: number; debug?: { targetStringId?: string } })
+      .filter((frame) => frame.debug?.targetStringId === "E4");
+
+    expect(correctedFrames.length).toBeGreaterThan(0);
+    expect(stableFrames).toHaveLength(0);
+  });
+
   it("keeps a direct B3 pluck from being retargeted to low E", () => {
     let ProcessorClass!: new (options: unknown) => {
       process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean;

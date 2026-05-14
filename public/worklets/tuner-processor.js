@@ -502,10 +502,10 @@ class TunerProcessor extends AudioWorkletProcessor {
       : [...this.hzHistory].sort((a, b) => a - b)[Math.floor(this.hzHistory.length / 2)];
 
     // Stable-tail: last N raw frames within STABLE_TAIL_CENTS of one another.
-    if (correctedHz > 0 && !transientSuppressed) {
-      this.recentHz.push(correctedHz);
+    if (rawHz > 0 && correctedHz > 0 && !transientSuppressed) {
+      this.recentHz.push(rawHz);
       if (this.recentHz.length > STABLE_TAIL_FRAMES) this.recentHz.shift();
-    } else if (transientSuppressed || correctedHz <= 0) {
+    } else if (transientSuppressed || rawHz <= 0 || correctedHz <= 0) {
       this.recentHz = [];
     }
     let stableTail = false;

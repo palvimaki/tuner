@@ -10,6 +10,7 @@ Reference nginx configuration and remote installer for hosting tuner.fi on a Deb
 Run the remote apply step from the repo root:
 
 ```bash
+DEPLOY_HOST=tuner.fi
 ssh "$DEPLOY_HOST" 'bash -s' < ops/deploy/apply-on-server.sh
 ```
 
@@ -22,4 +23,10 @@ The script:
 5. runs `sudo nginx -t`
 6. reloads nginx
 
-After that, run `scripts/deploy.sh` to push the built static files.
+After that, run `scripts/deploy.sh` to push the built static files and verify the same public target:
+
+```bash
+DEPLOY_HOST=tuner.fi DEPLOY_URL=https://tuner.fi scripts/deploy.sh
+```
+
+`DEPLOY_PATH` defaults to `/var/www/tuner.fi/`. If you target another host or path, set `DEPLOY_URL` to that same environment's public URL so the post-deploy checks verify the site you actually updated. The deploy rsync preserves `.well-known/` so webroot-based ACME challenges are not deleted.

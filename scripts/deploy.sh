@@ -29,11 +29,11 @@ assert_status() {
   fi
 }
 
-DEPLOY_HOST="${DEPLOY_HOST:-tuner.fi}"
+DEPLOY_HOST="${DEPLOY_HOST:-haukka}"
 : "${DEPLOY_PATH:=/var/www/tuner.fi/}"
 DEPLOY_URL="${DEPLOY_URL:-}"
 if [[ -z "$DEPLOY_URL" ]]; then
-  if [[ "$DEPLOY_HOST" == "tuner.fi" ]]; then
+  if [[ "$DEPLOY_HOST" == "haukka" ]]; then
     DEPLOY_URL="https://tuner.fi"
   else
     echo "Set DEPLOY_URL to the public URL being deployed, e.g. https://tuner.fi" >&2

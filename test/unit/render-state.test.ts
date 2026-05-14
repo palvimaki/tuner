@@ -11,7 +11,7 @@ describe("render state", () => {
     state.activeStringId = "E4";
     state.strings.E4.lockStartedMs = 1_000;
 
-    const renderState = buildRenderState(state, preset, false, false, 1_750);
+    const renderState = buildRenderState(state, preset, false, false, 1_375);
     const highE = renderState.strings.find((stringState) => stringState.id === "E4");
 
     expect(renderState.strings.map((stringState) => stringState.label)).toEqual([

@@ -3,10 +3,12 @@ import { absoluteLogDistance, centsFromHz } from "../audio/note-math";
 import { resolveStringTargetHz, type InstrumentString, type TuningPreset } from "../domain/instrument";
 
 export type TunerMode = "idle" | "probing" | "latched" | "locked" | "completed";
-export const TUNE_LOCK_MS = 1_000;
+export const TUNE_LOCK_MS = 500;
 export const LOCK_STABLE_FRAMES = 2;
-export const BASE_LOCK_TOLERANCE_CENTS = 7;
-export const LOW_STRING_LOCK_TOLERANCE_CENTS = 11;
+export const BASE_LOCK_TOLERANCE_CENTS = 8;
+export const LOW_STRING_LOCK_TOLERANCE_CENTS = 13;
+export const B_STRING_LOCK_TOLERANCE_CENTS = 10;
+export const NEAR_TUNED_JITTER_TOLERANCE_CENTS = 6;
 export const LOW_STRING_LOCK_HZ = 90;
 export const HIGH_CONFIDENCE_CLARITY = 0.9;
 export const HIGH_CONFIDENCE_RMS_DB = -45;
@@ -92,8 +94,11 @@ function tuningCentsFromHz(frequency: number, referenceHz: number): { rawCents: 
   return { rawCents, cents: rawCents, penalty: 0 };
 }
 
-function lockToleranceCents(targetHz: number): number {
-  return targetHz < LOW_STRING_LOCK_HZ ? LOW_STRING_LOCK_TOLERANCE_CENTS : BASE_LOCK_TOLERANCE_CENTS;
+function lockToleranceCents(stringDef: InstrumentString): number {
+  const targetHz = resolveStringTargetHz(stringDef);
+  if (targetHz < LOW_STRING_LOCK_HZ) return LOW_STRING_LOCK_TOLERANCE_CENTS;
+  if (stringDef.id.startsWith("B")) return B_STRING_LOCK_TOLERANCE_CENTS;
+  return BASE_LOCK_TOLERANCE_CENTS;
 }
 
 export function nearestPresetStringByLogDistance(
@@ -425,12 +430,11 @@ export function applyAnalysisFrame(
     const currentId = state.activeStringId;
     const current = state.strings[currentId];
     const currentDef = preset.strings.find((stringDef) => stringDef.id === currentId);
-    const toleranceCents = currentDef
-      ? lockToleranceCents(resolveStringTargetHz(currentDef))
-      : BASE_LOCK_TOLERANCE_CENTS;
+    const toleranceCents = currentDef ? lockToleranceCents(currentDef) : BASE_LOCK_TOLERANCE_CENTS;
     const displayCentsAbs = Math.abs(current.cents ?? Infinity);
     const instantCentsAbs = Math.abs(current.instantCents ?? Infinity);
-    const inTune = Math.max(displayCentsAbs, instantCentsAbs) <= toleranceCents;
+    const instantJitterLimit = toleranceCents + NEAR_TUNED_JITTER_TOLERANCE_CENTS;
+    const inTune = displayCentsAbs <= toleranceCents && instantCentsAbs <= instantJitterLimit;
     const lockEligible =
       inTune &&
       weightedPitchDistance(current, bestProfileScore(state)) <= 120 &&

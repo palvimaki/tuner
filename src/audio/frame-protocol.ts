@@ -34,8 +34,12 @@ export interface AnalysisFrameDebug {
   mpmHz?: number;
   mpmClarity?: number;
   cmndAtTau?: number;
+  rawCmndAtTau?: number;
   halfRatio?: number;
   doubleRatio?: number;
+  targetStringId?: string | null;
+  targetRelation?: "direct" | "harmonic" | "subharmonic" | null;
+  targetRelationMultiple?: number;
 }
 
 export interface WorkletConfig {

@@ -104,7 +104,7 @@ describe("session lock and completion", () => {
     expect(state.strings.E4.lockedInThisSession).toBe(true);
   });
 
-  it("locks high E when pitch frames are octave-shifted harmonics", () => {
+  it("locks high E when the worklet corrected octave-shifted harmonic frames", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);
     state.activeStringId = "E4";
@@ -129,8 +129,8 @@ describe("session lock and completion", () => {
       timestampMs: 0,
     };
 
-    applyAnalysisFrame(state, { ...frame, hz: 659.256 }, preset, 0);
-    const effect = applyAnalysisFrame(state, { ...frame, hz: 659.256 }, preset, 1_050);
+    applyAnalysisFrame(state, { ...frame, hz: 329.628, rawHz: 659.256 }, preset, 0);
+    const effect = applyAnalysisFrame(state, { ...frame, hz: 329.628, rawHz: 659.256 }, preset, 1_050);
 
     expect(effect.lockedStringId).toBe("E4");
     expect(state.strings.E4.lockedInThisSession).toBe(true);
@@ -370,13 +370,14 @@ describe("session lock and completion", () => {
     expect(stable.lockedStringId).toBe("E4");
   });
 
-  it("octave-shifted harmonic frames can tune the latched manual target without changing identity", () => {
+  it("corrected octave-shifted harmonic frames can tune the latched manual target without changing identity", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);
     setManualTarget(state, preset, "E4", 0);
 
     const frame = {
-      hz: 659.256,
+      hz: 329.628,
+      rawHz: 659.256,
       clarity: 0.96,
       rmsDb: -16,
       shortRmsDb: -16,
@@ -401,6 +402,42 @@ describe("session lock and completion", () => {
 
     expect(state.activeStringId).toBe("E4");
     expect(effect.lockedStringId).toBe("E4");
+  });
+
+  it("does not lock an uncorrected harmonic as if it were the target F0", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    setManualTarget(state, preset, "E4", 0);
+
+    const frame = {
+      hz: 659.256,
+      rawHz: 659.256,
+      clarity: 0.96,
+      rmsDb: -16,
+      shortRmsDb: -16,
+      slowRmsDb: -30,
+      onset: false as const,
+      variance: 1e-3,
+      amplitude: 0.2,
+      sampleWindow: 2048 as const,
+      profileScores: {
+        E2: -33,
+        A2: -28,
+        D3: -24,
+        G3: -18,
+        B3: -14,
+        E4: -4,
+      },
+      stableTail: true,
+      timestampMs: 0,
+    };
+
+    applyAnalysisFrame(state, frame, preset, 250);
+    const effect = applyAnalysisFrame(state, frame, preset, 1_350);
+
+    expect(effect.lockedStringId).toBeNull();
+    expect(state.strings.E4.lockedInThisSession).toBe(false);
+    expect(Math.abs(state.strings.E4.cents ?? 0)).toBeGreaterThan(1_100);
   });
 
   it("fires completion once the last string locks", () => {

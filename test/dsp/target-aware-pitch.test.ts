@@ -40,6 +40,34 @@ function cmndWithTroughs(troughs: Array<{ hz: number; value: number }>): Float32
 }
 
 describe("target-aware pitch correction", () => {
+  it("uses raw direct detector pitch for display when target search finds a biased trough", () => {
+    const gHz = guitarPresets[0].strings.find((stringDef) => stringDef.id === "G3")!.hz;
+    const biasedLocalHz = gHz * 2 ** (72 / 1200);
+    const result = resolveTargetAwarePitch({
+      rawHz: gHz,
+      rawConfidence: 0.96,
+      rawCmndAtTau: 0.04,
+      cmnd: cmndWithTroughs([
+        { hz: biasedLocalHz, value: 0.02 },
+        { hz: gHz, value: 0.08 },
+      ]),
+      sampleRate: SAMPLE_RATE,
+      targets: standardTargets(),
+      profileScores: {
+        E2: -38,
+        A2: -30,
+        D3: -20,
+        G3: -4,
+        B3: -22,
+        E4: -35,
+      },
+    });
+
+    expect(result.targetId).toBe("G3");
+    expect(result.relation).toBe("direct");
+    expect(Math.abs(centsFrom(result.hz, gHz))).toBeLessThan(5);
+  });
+
   it("uses raw harmonic relation for display when low E identity used a biased local trough", () => {
     const lowEHz = 82.4069;
     const biasedLocalHz = lowEHz * 2 ** (35 / 1200);

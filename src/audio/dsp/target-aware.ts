@@ -111,7 +111,7 @@ function displayHzFromRelation(
 ): number {
   if (relation.kind === "harmonic") return rawHz / relation.multiple;
   if (relation.kind === "subharmonic") return rawHz * relation.multiple;
-  return candidateHz;
+  return rawHz;
 }
 
 export function resolveTargetAwarePitch(input: TargetAwarePitchInput): TargetAwarePitchResult {
@@ -168,7 +168,7 @@ export function resolveTargetAwarePitch(input: TargetAwarePitchInput): TargetAwa
       if (Math.abs(displayTargetCents) > TARGET_SEARCH_CENTS) continue;
       const displayCmndAtTau =
         relation.kind === "direct"
-          ? candidate.cmndAtTau
+          ? input.rawCmndAtTau
           : cmndAtHz(input.cmnd, input.sampleRate, displayHz);
 
       candidates.push({

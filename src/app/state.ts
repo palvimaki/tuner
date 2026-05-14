@@ -160,8 +160,13 @@ function hydrateFrameLevels(state: AppState, frame: AnalysisFrame, preset: Tunin
 }
 
 function hydrateFramePitchIntoStrings(state: AppState, frame: AnalysisFrame, preset: TuningPreset): void {
+  const pitchTarget = frameTargetString(frame, preset);
   for (const stringDef of preset.strings) {
     const targetState = state.strings[stringDef.id];
+    if (pitchTarget?.id !== stringDef.id) {
+      if (!targetState.lockedInThisSession) resetStringPitch(targetState);
+      continue;
+    }
     if (frame.hz > 0) {
       const tuningCents = tuningCentsFromHz(frame.hz, resolveStringTargetHz(stringDef));
       targetState.rawCents = tuningCents.rawCents;
@@ -228,11 +233,13 @@ function likelyFrameString(
       const stringState = state.strings[stringDef.id];
       return {
         stringDef,
+        locked: stringState.lockedInThisSession,
         scoreDb: stringState.scoreDb,
         pitchDistance: weightedPitchDistance(stringState, frameBestScoreDb),
         basePitchDistance: candidatePitchDistance(stringState),
       };
     })
+    .filter((candidate) => !candidate.locked)
     .filter((candidate) => candidate.basePitchDistance <= 120);
 
   const ranked = candidates
@@ -267,6 +274,7 @@ function bestChallenger(
   const frameBestScoreDb = bestProfileScore(state);
   const candidates = preset.strings
     .filter((stringDef) => stringDef.id !== active.id)
+    .filter((stringDef) => !state.strings[stringDef.id].lockedInThisSession)
     .map((stringDef) => {
       const stringState = state.strings[stringDef.id];
       return {
@@ -384,18 +392,8 @@ export function applyAnalysisFrame(
 
   const admitted = frameAdmitted(frame);
   const transient = frameTransient(frame);
-  const highConfidence = frameHighConfidence(frame);
-  const completionResetTarget = admitted ? frameTargetString(frame, preset) : null;
 
-  if (
-    admitted &&
-    state.completedAtMs !== null &&
-    nowMs - state.completedAtMs >= 700 &&
-    (frame.onset ||
-      (highConfidence &&
-        completionResetTarget !== null &&
-        completionResetTarget.id !== state.activeStringId))
-  ) {
+  if (admitted && frame.onset && state.completedAtMs !== null && nowMs - state.completedAtMs >= 700) {
     resetLockSession(state);
   }
 
@@ -420,6 +418,7 @@ export function applyAnalysisFrame(
     hydrateFramePitchIntoStrings(state, frame, preset);
   }
 
+  const highConfidence = frameHighConfidence(frame);
   const stableTail = frameStableTail(frame);
 
   const onsetTarget = frame.onset
@@ -490,7 +489,9 @@ export function applyAnalysisFrame(
       ) {
         state.switchLeadFrames += 1;
         if (state.switchLeadFrames >= 4) {
-          latchString(state, challenger.stringDef.id, nowMs, 80, true);
+          state.activeStringId = challenger.stringDef.id;
+          state.switchLeadFrames = 0;
+          // Reset lock progress on the previous string.
           activeState.lockStartedMs = null;
           activeState.inToleranceFrames = 0;
         }

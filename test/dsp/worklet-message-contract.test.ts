@@ -59,6 +59,68 @@ function concatSignals(signals: readonly Float32Array[]): Float32Array {
 }
 
 describe("production worklet frame contract", () => {
+  it("posts raw direct F0 when target search finds the recurring sharp local trough", () => {
+    let ProcessorClass!: new (options: unknown) => {
+      process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean;
+    };
+    const posted: unknown[] = [];
+    const context = {
+      console,
+      sampleRate: SAMPLE_RATE,
+      currentTime: 0,
+      AudioWorkletProcessor: class {
+        port = { postMessage: (message: unknown) => posted.push(message), onmessage: null };
+      },
+      registerProcessor: (_name: string, cls: typeof ProcessorClass) => {
+        ProcessorClass = cls;
+      },
+    };
+    vm.createContext(context);
+    vm.runInContext(readFileSync("public/worklets/tuner-processor.js", "utf8"), context);
+
+    const g3Hz = 195.9977;
+    const biasedLocalHz = g3Hz * 2 ** (72 / 1200);
+    const cmnd = makeCmndWithTroughs([
+      { hz: biasedLocalHz, value: 0.02 },
+      { hz: g3Hz, value: 0.08 },
+    ]);
+    (context as typeof context & { findPitchYIN: unknown }).findPitchYIN = () => ({
+      hz: g3Hz,
+      confidence: 0.96,
+      cmndAtTau: 0.04,
+      cmnd,
+    });
+
+    const targets = [
+      ["E2", LOW_E_HZ],
+      ["A2", A2_HZ],
+      ["D3", 146.8324],
+      ["G3", g3Hz],
+      ["B3", B3_HZ],
+      ["E4", E4_HZ],
+    ].map(([id, hz]) => ({ id, hz }));
+    const processor = new ProcessorClass({
+      processorOptions: { targets, onsetThresholdDb: 8, onsetDebounceMs: 140 },
+    });
+    const signal = makePluck(g3Hz, 1.2, [1, 0.42, 0.24, 0.16]);
+    const output = new Float32Array(128);
+
+    for (let offset = 0; offset + 128 <= signal.length; offset += 128) {
+      context.currentTime = offset / SAMPLE_RATE;
+      processor.process([[signal.slice(offset, offset + 128)]], [[output]]);
+    }
+
+    const stableFrames = posted
+      .map((frame) => frame as { hz: number; stableTail?: boolean; debug?: { targetStringId?: string; targetRelation?: string } })
+      .filter((frame) => frame.stableTail);
+    const last = stableFrames.at(-1);
+
+    expect(last).toBeDefined();
+    expect(last?.debug?.targetStringId).toBe("G3");
+    expect(last?.debug?.targetRelation).toBe("direct");
+    expect(Math.abs((last?.hz ?? 0) - g3Hz)).toBeLessThan(0.5);
+  });
+
   it("posts raw-derived F0 when harmonic identity used a biased local trough", () => {
     let ProcessorClass!: new (options: unknown) => {
       process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean;

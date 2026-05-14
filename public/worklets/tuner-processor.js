@@ -89,6 +89,19 @@ function parabolicTau(d, tau) {
   return tau + (s0 - s2) / (2 * denom);
 }
 
+function cmndAtHz(cmnd, sampleRate, hz) {
+  if (hz <= 0) return 1;
+  const tau = Math.round(sampleRate / hz);
+  if (tau <= 0 || tau >= cmnd.length) return 1;
+  return cmnd[tau] ?? 1;
+}
+
+function displayHzFromRelation(rawHz, candidateHz, relation) {
+  if (relation.kind === "harmonic") return rawHz / relation.multiple;
+  if (relation.kind === "subharmonic") return rawHz * relation.multiple;
+  return candidateHz;
+}
+
 function findPitchYIN(input, sampleRate) {
   const maxTau = Math.min(input.length >> 1, Math.ceil(sampleRate / YIN_MIN_HZ) + 2);
   const minTau = Math.max(2, Math.floor(sampleRate / YIN_MAX_HZ));
@@ -217,9 +230,20 @@ function resolveTargetAwarePitch(yin, sampleRate, targets, profileScores) {
         relation.cents * 0.5 +
         profileDeficit * 4 +
         candidate.cmndAtTau * 35;
+      const displayHz = displayHzFromRelation(yin.hz, candidate.hz, relation);
+      if (displayHz <= 0) continue;
+      const displayTargetCents = centsBetween(displayHz, target.hz);
+      if (Math.abs(displayTargetCents) > TARGET_SEARCH_CENTS) continue;
+      const displayCmndAtTau =
+        relation.kind === "direct"
+          ? candidate.cmndAtTau
+          : cmndAtHz(yin.cmnd, sampleRate, displayHz);
 
       candidates.push({
         ...candidate,
+        hz: displayHz,
+        confidence: Math.max(0, Math.min(1, 1 - displayCmndAtTau)),
+        cmndAtTau: displayCmndAtTau,
         score,
         targetId: target.id,
         relation,

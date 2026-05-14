@@ -34,7 +34,81 @@ function makeCmndWithMinimum(hz: number): Float32Array {
   return cmnd;
 }
 
+function makeCmndWithTroughs(troughs: Array<{ hz: number; value: number }>): Float32Array {
+  const cmnd = new Float32Array(900);
+  cmnd.fill(0.95);
+  for (const trough of troughs) {
+    const tau = Math.round(SAMPLE_RATE / trough.hz);
+    for (let offset = -2; offset <= 2; offset += 1) {
+      cmnd[tau + offset] = trough.value + Math.abs(offset) * 0.015;
+    }
+  }
+  return cmnd;
+}
+
 describe("production worklet frame contract", () => {
+  it("posts raw-derived F0 when harmonic identity used a biased local trough", () => {
+    let ProcessorClass!: new (options: unknown) => {
+      process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean;
+    };
+    const posted: unknown[] = [];
+    const context = {
+      console,
+      sampleRate: SAMPLE_RATE,
+      currentTime: 0,
+      AudioWorkletProcessor: class {
+        port = { postMessage: (message: unknown) => posted.push(message), onmessage: null };
+      },
+      registerProcessor: (_name: string, cls: typeof ProcessorClass) => {
+        ProcessorClass = cls;
+      },
+    };
+    vm.createContext(context);
+    vm.runInContext(readFileSync("public/worklets/tuner-processor.js", "utf8"), context);
+
+    const biasedLocalHz = LOW_E_HZ * 2 ** (35 / 1200);
+    const cmnd = makeCmndWithTroughs([
+      { hz: biasedLocalHz, value: 0.02 },
+      { hz: LOW_E_HZ, value: 0.08 },
+    ]);
+    (context as typeof context & { findPitchYIN: unknown }).findPitchYIN = () => ({
+      hz: LOW_E_HZ * 2,
+      confidence: 0.96,
+      cmndAtTau: 0.04,
+      cmnd,
+    });
+
+    const targets = [
+      ["E2", LOW_E_HZ],
+      ["A2", 110],
+      ["D3", 146.8324],
+      ["G3", 195.9977],
+      ["B3", B3_HZ],
+      ["E4", E4_HZ],
+    ].map(([id, hz]) => ({ id, hz }));
+    const processor = new ProcessorClass({
+      processorOptions: { targets, onsetThresholdDb: 8, onsetDebounceMs: 140 },
+    });
+    const signal = makePluck(LOW_E_HZ, 1.2, [0.2, 0.4, 1, 0.25]);
+    const output = new Float32Array(128);
+
+    for (let offset = 0; offset + 128 <= signal.length; offset += 128) {
+      context.currentTime = offset / SAMPLE_RATE;
+      processor.process([[signal.slice(offset, offset + 128)]], [[output]]);
+    }
+
+    const stableFrames = posted
+      .map((frame) => frame as { hz: number; stableTail?: boolean; debug?: { targetStringId?: string; targetRelation?: string; targetRelationMultiple?: number } })
+      .filter((frame) => frame.stableTail);
+    const last = stableFrames.at(-1);
+
+    expect(last).toBeDefined();
+    expect(last?.debug?.targetStringId).toBe("E2");
+    expect(last?.debug?.targetRelation).toBe("harmonic");
+    expect(last?.debug?.targetRelationMultiple).toBe(2);
+    expect(Math.abs((last?.hz ?? 0) - LOW_E_HZ)).toBeLessThan(0.5);
+  });
+
   it("posts corrected F0 in frame.hz and raw detector output in frame.rawHz", () => {
     let ProcessorClass!: new (options: unknown) => {
       process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean;

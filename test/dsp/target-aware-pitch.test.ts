@@ -23,7 +23,110 @@ function targetsForPreset(presetId: string) {
     .strings.map((stringDef) => ({ id: stringDef.id, hz: stringDef.hz }));
 }
 
+function centsFrom(hz: number, ref: number): number {
+  return 1200 * Math.log2(hz / ref);
+}
+
+function cmndWithTroughs(troughs: Array<{ hz: number; value: number }>): Float32Array {
+  const cmnd = new Float32Array(900);
+  cmnd.fill(0.95);
+  for (const trough of troughs) {
+    const tau = Math.round(SAMPLE_RATE / trough.hz);
+    for (let offset = -2; offset <= 2; offset += 1) {
+      cmnd[tau + offset] = trough.value + Math.abs(offset) * 0.015;
+    }
+  }
+  return cmnd;
+}
+
 describe("target-aware pitch correction", () => {
+  it("uses raw harmonic relation for display when low E identity used a biased local trough", () => {
+    const lowEHz = 82.4069;
+    const biasedLocalHz = lowEHz * 2 ** (35 / 1200);
+    const result = resolveTargetAwarePitch({
+      rawHz: lowEHz * 2,
+      rawConfidence: 0.96,
+      rawCmndAtTau: 0.04,
+      cmnd: cmndWithTroughs([
+        { hz: biasedLocalHz, value: 0.02 },
+        { hz: lowEHz, value: 0.08 },
+      ]),
+      sampleRate: SAMPLE_RATE,
+      targets: standardTargets(),
+      profileScores: {
+        E2: -4,
+        A2: -22,
+        D3: -28,
+        G3: -33,
+        B3: -38,
+        E4: -45,
+      },
+    });
+
+    expect(result.targetId).toBe("E2");
+    expect(result.relation).toBe("harmonic");
+    expect(result.relationMultiple).toBe(2);
+    expect(Math.abs(centsFrom(result.hz, lowEHz))).toBeLessThan(5);
+  });
+
+  it("uses raw subharmonic relation for display when high E identity used a biased local trough", () => {
+    const e4Hz = guitarPresets[0].strings.find((stringDef) => stringDef.id === "E4")!.hz;
+    const biasedLocalHz = e4Hz * 2 ** (-35 / 1200);
+    const result = resolveTargetAwarePitch({
+      rawHz: e4Hz / 2,
+      rawConfidence: 0.96,
+      rawCmndAtTau: 0.04,
+      cmnd: cmndWithTroughs([
+        { hz: biasedLocalHz, value: 0.02 },
+      ]),
+      sampleRate: SAMPLE_RATE,
+      targets: standardTargets(),
+      profileScores: {
+        E2: -45,
+        A2: -38,
+        D3: -32,
+        G3: -25,
+        B3: -18,
+        E4: -4,
+      },
+    });
+
+    expect(result.targetId).toBe("E4");
+    expect(result.relation).toBe("subharmonic");
+    expect(result.relationMultiple).toBe(2);
+    expect(Math.abs(centsFrom(result.hz, e4Hz))).toBeLessThan(5);
+  });
+
+  it("keeps genuine low-E harmonic detune visible instead of snapping to center", () => {
+    const lowEHz = 82.4069;
+    const sharpLowEHz = lowEHz * 2 ** (50 / 1200);
+    const result = resolveTargetAwarePitch({
+      rawHz: sharpLowEHz * 2,
+      rawConfidence: 0.96,
+      rawCmndAtTau: 0.04,
+      cmnd: cmndWithTroughs([
+        { hz: sharpLowEHz, value: 0.02 },
+        { hz: lowEHz, value: 0.2 },
+      ]),
+      sampleRate: SAMPLE_RATE,
+      targets: standardTargets(),
+      profileScores: {
+        E2: -4,
+        A2: -22,
+        D3: -28,
+        G3: -33,
+        B3: -38,
+        E4: -45,
+      },
+    });
+
+    expect(result.targetId).toBe("E2");
+    expect(result.relation).toBe("harmonic");
+    expect(result.relationMultiple).toBe(2);
+    expect(centsFrom(result.hz, lowEHz)).toBeGreaterThan(45);
+    expect(centsFrom(result.hz, lowEHz)).toBeLessThan(55);
+  });
+
   it("does not steal an ambiguous low-E third-harmonic hit from direct B3", () => {
     const preset = guitarPresets[0];
     const lowEHz = 82.4069;

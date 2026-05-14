@@ -36,7 +36,7 @@ fi
 
 rsync -az --delete "${RSYNC_EXCLUDES[@]}" dist/ "${DEPLOY_HOST}:${DEPLOY_PATH}"
 
-ssh "$VERIFY_HOST" DEPLOY_URL="$DEPLOY_URL" bash -s <<'EOF'
+ssh "$VERIFY_HOST" "DEPLOY_URL='$DEPLOY_URL' bash -s" <<'EOF'
 set -euo pipefail
 curl -fsS -o /dev/null -w "GET /            status=%{http_code} type=%{content_type}\n" "${DEPLOY_URL}/"
 curl -fsS -o /dev/null -w "GET /sw.js       status=%{http_code} type=%{content_type}\n" "${DEPLOY_URL}/sw.js"

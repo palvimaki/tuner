@@ -29,9 +29,17 @@ assert_status() {
   fi
 }
 
-: "${DEPLOY_HOST:?Set DEPLOY_HOST to the SSH alias for the production server}"
+DEPLOY_HOST="${DEPLOY_HOST:-tuner.fi}"
 : "${DEPLOY_PATH:=/var/www/tuner.fi/}"
-: "${DEPLOY_URL:?Set DEPLOY_URL to the public URL being deployed, e.g. https://tuner.fi}"
+DEPLOY_URL="${DEPLOY_URL:-}"
+if [[ -z "$DEPLOY_URL" ]]; then
+  if [[ "$DEPLOY_HOST" == "tuner.fi" ]]; then
+    DEPLOY_URL="https://tuner.fi"
+  else
+    echo "Set DEPLOY_URL to the public URL being deployed, e.g. https://tuner.fi" >&2
+    exit 2
+  fi
+fi
 DEPLOY_URL="${DEPLOY_URL%/}"
 RSYNC_EXCLUDES=(--exclude '.DS_Store' --exclude '.well-known/')
 

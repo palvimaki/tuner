@@ -30,3 +30,5 @@ DEPLOY_HOST=tuner.fi DEPLOY_URL=https://tuner.fi scripts/deploy.sh
 ```
 
 `DEPLOY_PATH` defaults to `/var/www/tuner.fi/`. If you target another host or path, set `DEPLOY_URL` to that same environment's public URL so the post-deploy checks verify the site you actually updated. The deploy rsync preserves `.well-known/` so webroot-based ACME challenges are not deleted.
+
+For the dev mirror, use `scripts/deploy-dev.sh`. It defaults to the allowlisted `tuner.hoitovirhe.fi` mirror and runs smoke checks from the deploy host so workstation IP allowlists do not create false negatives.

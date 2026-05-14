@@ -97,8 +97,7 @@ describe("session lock and completion", () => {
     };
 
     applyAnalysisFrame(state, { ...frame, hz: 329.628 }, preset, 0);
-    applyAnalysisFrame(state, { ...frame, hz: 330.963 }, preset, 800);
-    const effect = applyAnalysisFrame(state, { ...frame, hz: 328.866 }, preset, 1_050);
+    const effect = applyAnalysisFrame(state, { ...frame, hz: 330.963 }, preset, 800);
 
     expect(effect.lockedStringId).toBe("E4");
     expect(state.strings.E4.lockedInThisSession).toBe(true);
@@ -166,16 +165,91 @@ describe("session lock and completion", () => {
     };
 
     applyAnalysisFrame(state, { ...frame, hz: hzAtCents(targetHz, 10.5) }, preset, 0);
-    applyAnalysisFrame(state, { ...frame, hz: hzAtCents(targetHz, 9.8) }, preset, 520);
+    const effect = applyAnalysisFrame(state, { ...frame, hz: hzAtCents(targetHz, 9.8) }, preset, 520);
+
+    expect(effect.lockedStringId).toBe("E2");
+    expect(state.strings.E2.lockedInThisSession).toBe(true);
+  });
+
+  it("averages low E center-line jitter instead of resetting the lock timer", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "E2";
+    state.mode = "latched";
+    const targetHz = 82.4069;
+    const frame = {
+      clarity: 0.98,
+      confidence: 0.94,
+      rmsDb: -17,
+      shortRmsDb: -17,
+      slowRmsDb: -30,
+      onset: false,
+      variance: 1e-3,
+      amplitude: 0.2,
+      sampleWindow: 4096 as const,
+      profileScores: {
+        E2: -6,
+        A2: -21,
+        D3: -27,
+        G3: -31,
+        B3: -35,
+        E4: -40,
+      },
+      stableTail: true,
+      timestampMs: 0,
+    };
+
+    applyAnalysisFrame(state, { ...frame, hz: hzAtCents(targetHz, 14) }, preset, 0);
+    applyAnalysisFrame(state, { ...frame, hz: hzAtCents(targetHz, -2) }, preset, 280);
     const effect = applyAnalysisFrame(
       state,
-      { ...frame, hz: hzAtCents(targetHz, 10.2) },
+      { ...frame, hz: hzAtCents(targetHz, 14) },
       preset,
-      1_080,
+      820,
     );
 
     expect(effect.lockedStringId).toBe("E2");
     expect(state.strings.E2.lockedInThisSession).toBe(true);
+  });
+
+  it("uses a slightly wider in-tune window for the B string", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "B3";
+    state.mode = "latched";
+    const targetHz = 246.942;
+    const frame = {
+      clarity: 0.98,
+      confidence: 0.94,
+      rmsDb: -17,
+      shortRmsDb: -17,
+      slowRmsDb: -30,
+      onset: false,
+      variance: 1e-3,
+      amplitude: 0.2,
+      sampleWindow: 2048 as const,
+      profileScores: {
+        E2: -40,
+        A2: -34,
+        D3: -26,
+        G3: -14,
+        B3: -4,
+        E4: -15,
+      },
+      stableTail: true,
+      timestampMs: 0,
+    };
+
+    applyAnalysisFrame(state, { ...frame, hz: hzAtCents(targetHz, 9.5) }, preset, 0);
+    const effect = applyAnalysisFrame(
+      state,
+      { ...frame, hz: hzAtCents(targetHz, 9.2) },
+      preset,
+      560,
+    );
+
+    expect(effect.lockedStringId).toBe("B3");
+    expect(state.strings.B3.lockedInThisSession).toBe(true);
   });
 
   it("keeps the tighter settle gate on high E", () => {

@@ -5,7 +5,6 @@ export class Renderer {
   private state: RenderState = {
     mode: "idle",
     strings: [],
-    dimmed: false,
     pulsePicker: false,
     celebrationProgress: 0,
   };
@@ -154,11 +153,6 @@ export class Renderer {
       context.moveTo(24, shimmerY);
       context.lineTo(width - 24, shimmerY);
       context.stroke();
-    }
-
-    if (this.state.dimmed) {
-      context.fillStyle = "rgba(7, 5, 4, 0.46)";
-      context.fillRect(0, 0, width, height);
     }
 
     requestAnimationFrame(this.render);

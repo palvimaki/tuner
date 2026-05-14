@@ -11,7 +11,7 @@ describe("render state", () => {
     state.activeStringId = "E4";
     state.strings.E4.lockStartedMs = 1_000;
 
-    const renderState = buildRenderState(state, preset, false, false, 1_750);
+    const renderState = buildRenderState(state, preset, false, 1_375);
     const highE = renderState.strings.find((stringState) => stringState.id === "E4");
 
     expect(renderState.strings.map((stringState) => stringState.label)).toEqual([
@@ -33,7 +33,7 @@ describe("render state", () => {
     state.strings.E4.lockedInThisSession = true;
     state.strings.E4.lockedAtMs = 2_000;
 
-    const renderState = buildRenderState(state, preset, false, false, 2_300);
+    const renderState = buildRenderState(state, preset, false, 2_300);
     const highE = renderState.strings.find((stringState) => stringState.id === "E4");
 
     expect(highE?.donePulse).toBeGreaterThan(0.6);

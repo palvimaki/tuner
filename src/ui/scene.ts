@@ -17,7 +17,6 @@ export interface RenderString {
 export interface RenderState {
   mode: AppState["mode"];
   strings: RenderString[];
-  dimmed: boolean;
   pulsePicker: boolean;
   celebrationProgress: number;
 }
@@ -42,7 +41,6 @@ export function nearestStringIndexFromX(width: number, count: number, x: number)
 export function buildRenderState(
   state: AppState,
   preset: TuningPreset,
-  dimmed: boolean,
   pulsePicker: boolean,
   nowMs: number,
 ): RenderState {
@@ -51,7 +49,6 @@ export function buildRenderState(
 
   return {
     mode: state.mode,
-    dimmed,
     pulsePicker,
     celebrationProgress,
     strings: preset.strings.map((stringDef) => {

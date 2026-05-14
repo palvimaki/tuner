@@ -39,7 +39,7 @@ npm run build      # type-check + production build
 - [src/audio/dsp/](src/audio/dsp/) — YIN, MPM, Goertzel, onset detection, harmonic profiling, smoothing
 - [src/domain/](src/domain/) — instrument and tuning definitions
 - [src/ui/](src/ui/) — renderer, controls, scene, theme
-- [src/app/](src/app/) — bootstrap, state, routing, session
+- [src/app/](src/app/) — bootstrap, state, session
 - [src/pwa/](src/pwa/) — service-worker integration, version checks
 - [public/worklets/tuner-processor.js](public/worklets/tuner-processor.js) — the AudioWorklet that does pitch detection
 

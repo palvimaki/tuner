@@ -85,6 +85,10 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
   root.replaceChildren(shell);
 
   const engine = new AudioEngine(instrument, version);
+  let audioWasLive = false;
+  let resumeAfterVisibilityRestore = false;
+  let lifecycleGeneration = 0;
+  let startInFlight: Promise<void> | null = null;
   engine.onFrame((frame) => {
     const nowMs = performance.now();
     applyAnalysisFrame(state, frame, preset, nowMs);
@@ -93,9 +97,14 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     renderer.setState(renderState);
   });
 
-  const startAudio = async (): Promise<void> => {
+  const runStartAudio = async (): Promise<void> => {
+    const generation = lifecycleGeneration;
     try {
       await engine.start(targetsForPreset(preset));
+      if (document.hidden || generation !== lifecycleGeneration) {
+        await engine.stop();
+        return;
+      }
       markMicGranted();
       const ok = await engine.waitForLiveInput({
         timeoutMs: 1500,
@@ -103,12 +112,27 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
         minVariance: 1e-7,
       });
       if (ok) {
+        audioWasLive = true;
         glassVeil.hidden = true;
         await requestWakeLock();
+      } else {
+        audioWasLive = false;
+        glassVeil.hidden = false;
       }
     } catch {
+      audioWasLive = false;
+      glassVeil.hidden = false;
       // Keep the microphone prompt visible so the user can retry in-place.
     }
+  };
+
+  const startAudio = (): Promise<void> => {
+    if (!startInFlight) {
+      startInFlight = runStartAudio().finally(() => {
+        startInFlight = null;
+      });
+    }
+    return startInFlight;
   };
 
   glassVeil.querySelector("button")?.addEventListener("click", () => {
@@ -121,11 +145,32 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
 
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
+      lifecycleGeneration += 1;
+      resumeAfterVisibilityRestore = audioWasLive;
+      audioWasLive = false;
+      glassVeil.hidden = false;
       void releaseWakeLock();
-      void engine.suspend();
+      void engine.stop();
       return;
     }
-    void engine.resume().then(() => requestWakeLock());
+    if (resumeAfterVisibilityRestore) {
+      resumeAfterVisibilityRestore = false;
+      void startAudio();
+    }
+  });
+
+  window.addEventListener("pagehide", () => {
+    lifecycleGeneration += 1;
+    audioWasLive = false;
+    resumeAfterVisibilityRestore = false;
+    void releaseWakeLock();
+    void engine.stop();
+  });
+
+  window.addEventListener("beforeunload", () => {
+    lifecycleGeneration += 1;
+    void releaseWakeLock();
+    void engine.stop();
   });
 
   const initialRenderState = buildRenderState(

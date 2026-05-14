@@ -151,7 +151,15 @@ function smoothCents(previous: number | null, next: number | null): number | nul
   return previous + (next - previous) * 0.32;
 }
 
-function hydrateFrameIntoStrings(state: AppState, frame: AnalysisFrame, preset: TuningPreset): void {
+function hydrateFrameLevels(state: AppState, frame: AnalysisFrame, preset: TuningPreset): void {
+  for (const stringDef of preset.strings) {
+    const targetState = state.strings[stringDef.id];
+    targetState.amplitude = frame.amplitude;
+    targetState.scoreDb = frame.profileScores[stringDef.id] ?? -120;
+  }
+}
+
+function hydrateFramePitchIntoStrings(state: AppState, frame: AnalysisFrame, preset: TuningPreset): void {
   for (const stringDef of preset.strings) {
     const targetState = state.strings[stringDef.id];
     if (frame.hz > 0) {
@@ -166,8 +174,15 @@ function hydrateFrameIntoStrings(state: AppState, frame: AnalysisFrame, preset: 
       targetState.pitchPenaltyCents = 0;
       targetState.cents = smoothCents(targetState.cents, null);
     }
-    targetState.amplitude = frame.amplitude;
-    targetState.scoreDb = frame.profileScores[stringDef.id] ?? -120;
+  }
+}
+
+function clearPitchState(state: AppState): void {
+  for (const stringState of Object.values(state.strings)) {
+    stringState.rawCents = null;
+    stringState.instantCents = null;
+    stringState.cents = null;
+    stringState.pitchPenaltyCents = 0;
   }
 }
 
@@ -329,14 +344,17 @@ export function applyAnalysisFrame(
     Object.assign(state, fresh);
   }
 
-  hydrateFrameIntoStrings(state, frame, preset);
+  const admitted = frameAdmitted(frame);
+  const transient = frameTransient(frame);
+  hydrateFrameLevels(state, frame, preset);
 
-  if (!frameAdmitted(frame)) {
+  if (!admitted) {
     if (state.activeStringId && nowMs - state.lastGoodFrameAtMs >= 2_500) {
       state.activeStringId = null;
       state.mode = "probing";
       state.switchLeadFrames = 0;
       resetProbe(state);
+      clearPitchState(state);
     }
     return { lockedStringId: null, completed: false };
   }
@@ -345,7 +363,10 @@ export function applyAnalysisFrame(
   state.lastActivityAtMs = nowMs;
   if (state.mode === "idle") state.mode = "probing";
 
-  const transient = frameTransient(frame);
+  if (!transient) {
+    hydrateFramePitchIntoStrings(state, frame, preset);
+  }
+
   const highConfidence = frameHighConfidence(frame);
   const stableTail = frameStableTail(frame);
 

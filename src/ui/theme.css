@@ -56,8 +56,7 @@ button {
 .picker-toggle,
 .preset-panel,
 .preset-button,
-.mic-button,
-.fallback-glyph {
+.mic-button {
   pointer-events: auto;
 }
 
@@ -353,7 +352,6 @@ button {
 }
 
 .glass-veil[hidden],
-.fallback-glyph[hidden],
 .install-panel[hidden],
 .preset-panel[hidden] {
   display: none !important;
@@ -416,52 +414,4 @@ button {
   background: rgba(247, 233, 200, 0.9);
   border-radius: 999px;
   transform: translateX(-50%);
-}
-
-.fallback-glyph {
-  position: absolute;
-  left: 50%;
-  bottom: max(44px, env(safe-area-inset-bottom));
-  transform: translateX(-50%);
-  width: 66px;
-  height: 66px;
-  border-radius: 50%;
-  border: 1px solid rgba(245, 229, 191, 0.18);
-  background: rgba(244, 234, 209, 0.08);
-  backdrop-filter: blur(18px);
-  z-index: 3;
-}
-
-.fallback-arrow,
-.fallback-arrow::before,
-.fallback-arrow::after {
-  position: absolute;
-  content: "";
-  background: rgba(248, 239, 214, 0.85);
-}
-
-.fallback-arrow {
-  width: 20px;
-  height: 2px;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%) rotate(-35deg);
-}
-
-.fallback-arrow::before {
-  width: 2px;
-  height: 20px;
-  left: 14px;
-  top: -9px;
-}
-
-.fallback-arrow::after {
-  width: 12px;
-  height: 12px;
-  border-top: 2px solid rgba(248, 239, 214, 0.85);
-  border-right: 2px solid rgba(248, 239, 214, 0.85);
-  background: transparent;
-  right: -2px;
-  top: -7px;
-  transform: rotate(0deg);
 }

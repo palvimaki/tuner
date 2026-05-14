@@ -1,7 +1,6 @@
 import { AudioEngine } from "../audio/audio-engine";
 import type { AnalysisTarget } from "../audio/frame-protocol";
 import { instrumentRegistry } from "./registry";
-import { isStandaloneMode, openBrowserEscape } from "./routing";
 import {
   hasKnownMicGrant,
   hasOpenedInstallHint,
@@ -14,7 +13,6 @@ import { applyAnalysisFrame, createInitialState, resetForPreset } from "./state"
 import { getPresetById } from "../domain/tuning";
 import { resolveStringTargetHz } from "../domain/instrument";
 import { createControls } from "../ui/controls";
-import { createFallbackGlyph } from "../ui/fallback-glyph";
 import { Renderer } from "../ui/renderer";
 import { buildRenderState } from "../ui/scene";
 import { requestWakeLock, releaseWakeLock } from "../pwa/wake-lock";
@@ -52,7 +50,6 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
   const instrument = instrumentRegistry.guitar;
   let preset = getPresetById(instrument.presets, instrument.defaultPresetId);
   let state = createInitialState(preset);
-  const standalone = isStandaloneMode();
 
   const shell = document.createElement("div");
   shell.className = "app-shell";
@@ -77,35 +74,26 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
       state = resetForPreset(preset);
       controls.setActivePreset(presetId);
       controls.setPulse(false);
-      const renderState = buildRenderState(
-        state,
-        preset,
-        !fallback.hidden,
-        !hasOpenedControls(),
-        performance.now(),
-      );
+      const renderState = buildRenderState(state, preset, !hasOpenedControls(), performance.now());
       controls.setStringLabels(renderState.strings);
       renderer.setState(renderState);
       if (engine) engine.setTargets(targetsForPreset(preset));
     },
   });
   const glassVeil = buildGlassVeil();
-  const fallback = createFallbackGlyph(() => openBrowserEscape());
-  fallback.hidden = true;
-  shell.append(canvas, controls.root, glassVeil, fallback);
+  shell.append(canvas, controls.root, glassVeil);
   root.replaceChildren(shell);
 
   const engine = new AudioEngine(instrument, version);
   engine.onFrame((frame) => {
     const nowMs = performance.now();
     applyAnalysisFrame(state, frame, preset, nowMs);
-    const renderState = buildRenderState(state, preset, !fallback.hidden, !hasOpenedControls(), nowMs);
+    const renderState = buildRenderState(state, preset, !hasOpenedControls(), nowMs);
     controls.setStringLabels(renderState.strings);
     renderer.setState(renderState);
   });
 
   const startAudio = async (): Promise<void> => {
-    fallback.hidden = true;
     try {
       await engine.start(targetsForPreset(preset));
       markMicGranted();
@@ -114,16 +102,12 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
         minLiveFrames: 12,
         minVariance: 1e-7,
       });
-      if (!ok && standalone) {
-        fallback.hidden = false;
-      } else {
+      if (ok) {
         glassVeil.hidden = true;
         await requestWakeLock();
       }
     } catch {
-      if (standalone) {
-        fallback.hidden = false;
-      }
+      // Keep the microphone prompt visible so the user can retry in-place.
     }
   };
 
@@ -147,7 +131,6 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
   const initialRenderState = buildRenderState(
     state,
     preset,
-    false,
     !hasOpenedControls(),
     performance.now(),
   );

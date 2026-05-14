@@ -850,52 +850,6 @@ describe("session lock and completion", () => {
     expect(state.strings.D3.instantCents).toBeNull();
   });
 
-  it("clears stale cents when challenger switching hands off without an onset", () => {
-    const preset = guitarPresets[0];
-    const state = createInitialState(preset);
-    state.activeStringId = "G3";
-    state.mode = "latched";
-    state.strings.G3.lockedInThisSession = true;
-
-    const frame = {
-      hz: 146.8324,
-      clarity: 0.98,
-      confidence: 0.98,
-      rmsDb: -17,
-      shortRmsDb: -17,
-      slowRmsDb: -32,
-      onset: false,
-      variance: 1e-3,
-      amplitude: 0.3,
-      sampleWindow: 4096 as const,
-      profileScores: {
-        E2: -32,
-        A2: -24,
-        D3: -6,
-        G3: -22,
-        B3: -31,
-        E4: -38,
-      },
-      stableTail: true,
-      debug: {
-        targetStringId: "D3",
-        targetRelation: "direct" as const,
-        targetRelationMultiple: 1,
-      },
-      timestampMs: 0,
-    };
-
-    applyAnalysisFrame(state, frame, preset, 200);
-    applyAnalysisFrame(state, frame, preset, 220);
-    applyAnalysisFrame(state, frame, preset, 240);
-    applyAnalysisFrame(state, frame, preset, 260);
-
-    expect(state.activeStringId).toBe("D3");
-    expect(state.strings.D3.cents).toBeNull();
-    expect(state.strings.D3.instantCents).toBeNull();
-    expect(state.strings.G3.lockedInThisSession).toBe(true);
-  });
-
   it("starts a fresh lock session on the next onset after completion", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);
@@ -946,58 +900,6 @@ describe("session lock and completion", () => {
     expect(state.activeStringId).toBe("E2");
     expect(state.strings.E2.lockedInThisSession).toBe(false);
     expect(state.strings.A2.lockedInThisSession).toBe(false);
-  });
-
-  it("starts a fresh lock session after completion even when the next pluck misses onset", () => {
-    const preset = guitarPresets[0];
-    const state = createInitialState(preset);
-    state.mode = "completed";
-    state.activeStringId = "E4";
-    state.completedAtMs = 1_000;
-    for (const stringDef of preset.strings) {
-      state.strings[stringDef.id].lockedInThisSession = true;
-      state.strings[stringDef.id].lockedAtMs = 900;
-    }
-
-    const frame = {
-      hz: 82.4069,
-      clarity: 0.96,
-      confidence: 0.96,
-      rmsDb: -17,
-      shortRmsDb: -17,
-      slowRmsDb: -32,
-      onset: false,
-      variance: 1e-3,
-      amplitude: 0.35,
-      sampleWindow: 4096 as const,
-      profileScores: {
-        E2: -6,
-        A2: -20,
-        D3: -26,
-        G3: -30,
-        B3: -34,
-        E4: -39,
-      },
-      stableTail: true,
-      debug: {
-        targetStringId: "E2",
-        targetRelation: "direct" as const,
-        targetRelationMultiple: 1,
-      },
-      timestampMs: 0,
-    };
-
-    applyAnalysisFrame(state, frame, preset, 1_800);
-
-    expect(state.completedAtMs).toBeNull();
-    expect(state.mode).toBe("probing");
-    expect(state.activeStringId).toBeNull();
-    expect(state.probeStringId).toBe("E2");
-    expect(state.strings.E2.lockedInThisSession).toBe(false);
-    expect(state.strings.A2.lockedInThisSession).toBe(false);
-
-    applyAnalysisFrame(state, frame, preset, 1_820);
-    expect(state.activeStringId).toBe("E2");
   });
 
   it("does not lock an uncorrected harmonic as if it were the target F0", () => {

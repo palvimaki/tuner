@@ -384,18 +384,8 @@ export function applyAnalysisFrame(
 
   const admitted = frameAdmitted(frame);
   const transient = frameTransient(frame);
-  const highConfidence = frameHighConfidence(frame);
-  const completionResetTarget = admitted ? frameTargetString(frame, preset) : null;
 
-  if (
-    admitted &&
-    state.completedAtMs !== null &&
-    nowMs - state.completedAtMs >= 700 &&
-    (frame.onset ||
-      (highConfidence &&
-        completionResetTarget !== null &&
-        completionResetTarget.id !== state.activeStringId))
-  ) {
+  if (admitted && frame.onset && state.completedAtMs !== null && nowMs - state.completedAtMs >= 700) {
     resetLockSession(state);
   }
 
@@ -420,6 +410,7 @@ export function applyAnalysisFrame(
     hydrateFramePitchIntoStrings(state, frame, preset);
   }
 
+  const highConfidence = frameHighConfidence(frame);
   const stableTail = frameStableTail(frame);
 
   const onsetTarget = frame.onset
@@ -490,7 +481,9 @@ export function applyAnalysisFrame(
       ) {
         state.switchLeadFrames += 1;
         if (state.switchLeadFrames >= 4) {
-          latchString(state, challenger.stringDef.id, nowMs, 80, true);
+          state.activeStringId = challenger.stringDef.id;
+          state.switchLeadFrames = 0;
+          // Reset lock progress on the previous string.
           activeState.lockStartedMs = null;
           activeState.inToleranceFrames = 0;
         }

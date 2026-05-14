@@ -17,7 +17,6 @@ const TARGET_SEARCH_CENTS = 140;
 const TARGET_MAX_CMNDF = 0.45;
 const RAW_RELATION_MAX_CENTS = 45;
 const MAX_HARMONIC_RELATION = 4;
-const PROFILE_FLOOR_DB = -180;
 
 function toDb(value) {
   return 20 * Math.log10(Math.max(value, 1e-9));
@@ -87,19 +86,6 @@ function parabolicTau(d, tau) {
   const denom = s0 + s2 - 2 * s1;
   if (denom === 0) return tau;
   return tau + (s0 - s2) / (2 * denom);
-}
-
-function cmndAtHz(cmnd, sampleRate, hz) {
-  if (hz <= 0) return 1;
-  const tau = Math.round(sampleRate / hz);
-  if (tau <= 0 || tau >= cmnd.length) return 1;
-  return cmnd[tau] ?? 1;
-}
-
-function displayHzFromRelation(rawHz, candidateHz, relation) {
-  if (relation.kind === "harmonic") return rawHz / relation.multiple;
-  if (relation.kind === "subharmonic") return rawHz * relation.multiple;
-  return rawHz;
 }
 
 function findPitchYIN(input, sampleRate) {
@@ -196,8 +182,8 @@ function resolveTargetAwarePitch(yin, sampleRate, targets, profileScores) {
   }
 
   const bestProfileScore = targets.reduce((best, target) => {
-    return Math.max(best, profileScores[target.id] ?? PROFILE_FLOOR_DB);
-  }, PROFILE_FLOOR_DB);
+    return Math.max(best, profileScores[target.id] ?? -120);
+  }, -120);
 
   const candidates = [];
   for (const target of targets) {
@@ -222,7 +208,7 @@ function resolveTargetAwarePitch(yin, sampleRate, targets, profileScores) {
       const relation = rawRelation(yin.hz, candidate.hz, target.hz);
       if (!relation) continue;
 
-      const profileScore = profileScores[target.id] ?? PROFILE_FLOOR_DB;
+      const profileScore = profileScores[target.id] ?? -120;
       const profileDeficit = Math.max(0, bestProfileScore - profileScore);
       const score =
         Math.abs(targetCents) +
@@ -230,20 +216,9 @@ function resolveTargetAwarePitch(yin, sampleRate, targets, profileScores) {
         relation.cents * 0.5 +
         profileDeficit * 4 +
         candidate.cmndAtTau * 35;
-      const displayHz = displayHzFromRelation(yin.hz, candidate.hz, relation);
-      if (displayHz <= 0) continue;
-      const displayTargetCents = centsBetween(displayHz, target.hz);
-      if (Math.abs(displayTargetCents) > TARGET_SEARCH_CENTS) continue;
-      const displayCmndAtTau =
-        relation.kind === "direct"
-          ? yin.cmndAtTau
-          : cmndAtHz(yin.cmnd, sampleRate, displayHz);
 
       candidates.push({
         ...candidate,
-        hz: displayHz,
-        confidence: Math.max(0, Math.min(1, 1 - displayCmndAtTau)),
-        cmndAtTau: displayCmndAtTau,
         score,
         targetId: target.id,
         relation,
@@ -367,21 +342,13 @@ class TunerProcessor extends AudioWorkletProcessor {
     this.analysisCounter = 0;
     this.hzHistory = [];
     this.recentHz = [];
-    this.lastTargetId = null;
     this.port.onmessage = (event) => {
       if (event.data?.type === "config") {
         this.targets = event.data.targets ?? this.targets;
         this.onsetThresholdDb = event.data.onsetThresholdDb ?? this.onsetThresholdDb;
         this.onsetDebounceMs = event.data.onsetDebounceMs ?? this.onsetDebounceMs;
-        this.resetPitchTracking();
       }
     };
-  }
-
-  resetPitchTracking() {
-    this.hzHistory = [];
-    this.recentHz = [];
-    this.lastTargetId = null;
   }
 
   copyWindow(size) {
@@ -406,16 +373,16 @@ class TunerProcessor extends AudioWorkletProcessor {
         .filter((candidate) => candidate.hz > target.hz);
       const penalty =
         lowerSameNoteTargets.length === 0
-          ? PROFILE_FLOOR_DB
+          ? -120
           : lowerSameNoteTargets.reduce((max, candidate) => {
               return Math.max(max, bandDb(signal, sampleRate, candidate.hz));
-            }, PROFILE_FLOOR_DB);
+            }, -120);
       const upperPenalty =
         upperSameNoteTargets.length === 0
-          ? PROFILE_FLOOR_DB
+          ? -120
           : upperSameNoteTargets.reduce((max, candidate) => {
               return Math.max(max, bandDb(signal, sampleRate, candidate.hz));
-            }, PROFILE_FLOOR_DB);
+            }, -120);
       const fundamentalMag = bandMagnitude(signal, sampleRate, target.hz);
       const secondMag = bandMagnitude(signal, sampleRate, target.hz * 2);
       const thirdMag = bandMagnitude(signal, sampleRate, target.hz * 3);
@@ -520,34 +487,24 @@ class TunerProcessor extends AudioWorkletProcessor {
 
     const rawHz = yin.hz;
     const correctedHz = f0CandidateHz;
-    const correctedTargetId = corrected.targetId ?? null;
-    const targetChanged =
-      correctedTargetId !== null &&
-      this.lastTargetId !== null &&
-      correctedTargetId !== this.lastTargetId;
-    if (onset || targetChanged) {
-      this.hzHistory = [];
-      this.recentHz = [];
-    }
     if (correctedHz > 0 && !transientSuppressed) {
-      this.hzHistory.push(correctedHz);
-      if (this.hzHistory.length > 3) this.hzHistory.shift();
+      if (onset) this.hzHistory = [correctedHz];
+      else {
+        this.hzHistory.push(correctedHz);
+        if (this.hzHistory.length > 3) this.hzHistory.shift();
+      }
     } else if (!correctedHz) {
-      this.resetPitchTracking();
+      this.hzHistory = [];
     }
-    if (correctedTargetId !== null && correctedHz > 0) {
-      this.lastTargetId = correctedTargetId;
-    }
-    const historyHz = this.hzHistory.length === 0
+    const hz = this.hzHistory.length === 0
       ? 0
       : [...this.hzHistory].sort((a, b) => a - b)[Math.floor(this.hzHistory.length / 2)];
-    const hz = transientSuppressed ? correctedHz : historyHz;
 
     // Stable-tail: last N raw frames within STABLE_TAIL_CENTS of one another.
-    if (rawHz > 0 && correctedHz > 0 && !transientSuppressed) {
-      this.recentHz.push(rawHz);
+    if (correctedHz > 0 && !transientSuppressed) {
+      this.recentHz.push(correctedHz);
       if (this.recentHz.length > STABLE_TAIL_FRAMES) this.recentHz.shift();
-    } else if (transientSuppressed || rawHz <= 0 || correctedHz <= 0) {
+    } else if (transientSuppressed || correctedHz <= 0) {
       this.recentHz = [];
     }
     let stableTail = false;

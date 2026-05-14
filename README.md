@@ -20,7 +20,6 @@ What you can verify by reading this repo:
 - Standard guitar tuning plus alternate tunings ([src/domain/tuning.ts](src/domain/tuning.ts))
 - Multiple instrument profiles ([src/domain/instruments/](src/domain/instruments/))
 - Installable PWA, works offline after first load
-- No sound-producing reference samples are shipped in this build; `/audio/guitar/*.m4a` is intentionally absent
 
 ## Local development
 

@@ -2,8 +2,6 @@ import type { InstrumentString, TuningPreset } from "../../domain/instrument";
 import { goertzelMagnitude } from "./goertzel";
 import { toDb } from "./smoothing";
 
-const PROFILE_FLOOR_DB = -180;
-
 function bandMagnitude(signal: ArrayLike<number>, sampleRate: number, hz: number): number {
   const offsets = [-25, 0, 25];
   return offsets.reduce((acc, cents) => {
@@ -31,10 +29,10 @@ function lowerSameNotePenaltyDb(
   preset: TuningPreset,
 ): number {
   const lowerFrequencies = lowerSameNoteFrequencies(stringDef, preset);
-  if (lowerFrequencies.length === 0) return PROFILE_FLOOR_DB;
+  if (lowerFrequencies.length === 0) return -120;
   return lowerFrequencies
     .map((hz) => bandDb(signal, sampleRate, hz))
-    .reduce((max, value) => Math.max(max, value), PROFILE_FLOOR_DB);
+    .reduce((max, value) => Math.max(max, value), -120);
 }
 
 function upperSameNotePenaltyDb(
@@ -48,10 +46,10 @@ function upperSameNotePenaltyDb(
     .filter((candidate) => candidate.id.slice(0, -1) === stringDef.id.slice(0, -1))
     .filter((candidate) => candidate.hz > stringDef.hz)
     .map((candidate) => candidate.hz);
-  if (upperFrequencies.length === 0) return PROFILE_FLOOR_DB;
+  if (upperFrequencies.length === 0) return -120;
   return upperFrequencies
     .map((hz) => bandDb(signal, sampleRate, hz))
-    .reduce((max, value) => Math.max(max, value), PROFILE_FLOOR_DB);
+    .reduce((max, value) => Math.max(max, value), -120);
 }
 
 export function scoreStringProfile(

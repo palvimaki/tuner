@@ -10,8 +10,6 @@ export const LOW_STRING_LOCK_TOLERANCE_CENTS = 11;
 export const LOW_STRING_LOCK_HZ = 90;
 export const HIGH_CONFIDENCE_CLARITY = 0.9;
 export const HIGH_CONFIDENCE_RMS_DB = -45;
-const DIRECT_FRAME_MIN_CONFIDENCE = 0.7;
-const CORRECTED_FRAME_MIN_CONFIDENCE = 0.55;
 const PROFILE_PENALTY_CENTS_PER_DB = 5;
 const PROFILE_PENALTY_MAX_CENTS = 120;
 
@@ -109,23 +107,7 @@ export function nearestPresetStringByLogDistance(
 }
 
 function frameAdmitted(frame: AnalysisFrame): boolean {
-  const correctedTarget =
-    frame.debug?.targetStringId &&
-    frame.debug.targetRelation !== undefined &&
-    frame.debug.targetRelation !== null &&
-    frame.debug.targetRelation !== "direct";
-  const pitchConfidence = typeof frame.confidence === "number" ? frame.confidence : frame.clarity;
-  const minConfidence =
-    typeof frame.confidence === "number"
-      ? correctedTarget
-        ? CORRECTED_FRAME_MIN_CONFIDENCE
-        : DIRECT_FRAME_MIN_CONFIDENCE
-      : 0.82;
-  return (
-    frame.rmsDb >= -55 &&
-    pitchConfidence >= minConfidence &&
-    Object.keys(frame.profileScores).length > 0
-  );
+  return frame.rmsDb >= -55 && frame.clarity >= 0.82 && Object.keys(frame.profileScores).length > 0;
 }
 
 function frameTransient(frame: AnalysisFrame): boolean {
@@ -136,7 +118,7 @@ function frameTransient(frame: AnalysisFrame): boolean {
 function frameHighConfidence(frame: AnalysisFrame): boolean {
   if (frame.lowConfidence === true) return false;
   if (typeof frame.confidence === "number") {
-    return frame.confidence >= DIRECT_FRAME_MIN_CONFIDENCE;
+    return frame.confidence >= 0.7;
   }
   return frame.clarity >= HIGH_CONFIDENCE_CLARITY && frame.rmsDb >= HIGH_CONFIDENCE_RMS_DB;
 }
@@ -151,22 +133,9 @@ function smoothCents(previous: number | null, next: number | null): number | nul
   return previous + (next - previous) * 0.32;
 }
 
-function hydrateFrameLevels(state: AppState, frame: AnalysisFrame, preset: TuningPreset): void {
+function hydrateFrameIntoStrings(state: AppState, frame: AnalysisFrame, preset: TuningPreset): void {
   for (const stringDef of preset.strings) {
     const targetState = state.strings[stringDef.id];
-    targetState.amplitude = frame.amplitude;
-    targetState.scoreDb = frame.profileScores[stringDef.id] ?? -120;
-  }
-}
-
-function hydrateFramePitchIntoStrings(state: AppState, frame: AnalysisFrame, preset: TuningPreset): void {
-  const pitchTarget = frameTargetString(frame, preset);
-  for (const stringDef of preset.strings) {
-    const targetState = state.strings[stringDef.id];
-    if (pitchTarget?.id !== stringDef.id) {
-      if (!targetState.lockedInThisSession) resetStringPitch(targetState);
-      continue;
-    }
     if (frame.hz > 0) {
       const tuningCents = tuningCentsFromHz(frame.hz, resolveStringTargetHz(stringDef));
       targetState.rawCents = tuningCents.rawCents;
@@ -179,19 +148,8 @@ function hydrateFramePitchIntoStrings(state: AppState, frame: AnalysisFrame, pre
       targetState.pitchPenaltyCents = 0;
       targetState.cents = smoothCents(targetState.cents, null);
     }
-  }
-}
-
-function resetStringPitch(stringState: StringVisualState): void {
-  stringState.rawCents = null;
-  stringState.instantCents = null;
-  stringState.cents = null;
-  stringState.pitchPenaltyCents = 0;
-}
-
-function clearPitchState(state: AppState): void {
-  for (const stringState of Object.values(state.strings)) {
-    resetStringPitch(stringState);
+    targetState.amplitude = frame.amplitude;
+    targetState.scoreDb = frame.profileScores[stringDef.id] ?? -120;
   }
 }
 
@@ -233,13 +191,11 @@ function likelyFrameString(
       const stringState = state.strings[stringDef.id];
       return {
         stringDef,
-        locked: stringState.lockedInThisSession,
         scoreDb: stringState.scoreDb,
         pitchDistance: weightedPitchDistance(stringState, frameBestScoreDb),
         basePitchDistance: candidatePitchDistance(stringState),
       };
     })
-    .filter((candidate) => !candidate.locked)
     .filter((candidate) => candidate.basePitchDistance <= 120);
 
   const ranked = candidates
@@ -274,7 +230,6 @@ function bestChallenger(
   const frameBestScoreDb = bestProfileScore(state);
   const candidates = preset.strings
     .filter((stringDef) => stringDef.id !== active.id)
-    .filter((stringDef) => !state.strings[stringDef.id].lockedInThisSession)
     .map((stringDef) => {
       const stringState = state.strings[stringDef.id];
       return {
@@ -309,47 +264,13 @@ function resetProbe(state: AppState): void {
   state.probeLeadFrames = 0;
 }
 
-function resetLockSession(state: AppState): void {
-  state.activeStringId = null;
-  state.completedAtMs = null;
-  state.mode = "probing";
-  state.switchLeadFrames = 0;
-  resetProbe(state);
-  for (const stringState of Object.values(state.strings)) {
-    stringState.lockedInThisSession = false;
-    stringState.lockStartedMs = null;
-    stringState.lockedAtMs = null;
-    stringState.inToleranceFrames = 0;
-    resetStringPitch(stringState);
-  }
-}
-
-function frameTargetString(frame: AnalysisFrame, preset: TuningPreset): InstrumentString | null {
-  const debugTargetId = frame.debug?.targetStringId;
-  const debugTarget = debugTargetId
-    ? preset.strings.find((stringDef) => stringDef.id === debugTargetId)
-    : undefined;
-  if (debugTarget) return debugTarget;
-  return frame.hz > 0 ? nearestPresetStringByLogDistance(frame.hz, preset) : null;
-}
-
-function latchString(
-  state: AppState,
-  stringId: string,
-  nowMs: number,
-  latchMs: number,
-  clearLatchedPitch = false,
-): void {
+function latchString(state: AppState, stringId: string, nowMs: number, latchMs: number): void {
   const previous = state.activeStringId;
   state.activeStringId = stringId;
   state.onsetLatchUntilMs = nowMs + latchMs;
   state.switchLeadFrames = 0;
   resetProbe(state);
   state.mode = "latched";
-  if (clearLatchedPitch) {
-    const nextState = state.strings[stringId];
-    if (nextState) resetStringPitch(nextState);
-  }
   if (previous && previous !== stringId) {
     const prevState = state.strings[previous];
     if (prevState) {
@@ -376,7 +297,7 @@ export function setManualTarget(
   const stringDef = preset.strings.find((s) => s.id === stringId);
   if (!stringDef) return;
   state.manualTargetStringId = stringId;
-  latchString(state, stringId, nowMs, 200, true);
+  latchString(state, stringId, nowMs, 200);
 }
 
 export function applyAnalysisFrame(
@@ -390,22 +311,14 @@ export function applyAnalysisFrame(
     Object.assign(state, fresh);
   }
 
-  const admitted = frameAdmitted(frame);
-  const transient = frameTransient(frame);
+  hydrateFrameIntoStrings(state, frame, preset);
 
-  if (admitted && frame.onset && state.completedAtMs !== null && nowMs - state.completedAtMs >= 700) {
-    resetLockSession(state);
-  }
-
-  hydrateFrameLevels(state, frame, preset);
-
-  if (!admitted) {
+  if (!frameAdmitted(frame)) {
     if (state.activeStringId && nowMs - state.lastGoodFrameAtMs >= 2_500) {
       state.activeStringId = null;
       state.mode = "probing";
       state.switchLeadFrames = 0;
       resetProbe(state);
-      clearPitchState(state);
     }
     return { lockedStringId: null, completed: false };
   }
@@ -414,29 +327,17 @@ export function applyAnalysisFrame(
   state.lastActivityAtMs = nowMs;
   if (state.mode === "idle") state.mode = "probing";
 
-  if (!transient) {
-    hydrateFramePitchIntoStrings(state, frame, preset);
-  }
-
+  const transient = frameTransient(frame);
   const highConfidence = frameHighConfidence(frame);
   const stableTail = frameStableTail(frame);
 
-  const onsetTarget = frame.onset
-    ? state.manualTargetStringId
-      ? preset.strings.find((s) => s.id === state.manualTargetStringId) ?? null
-      : frameTargetString(frame, preset)
-    : null;
-
-  if (frame.onset && frame.hz > 0 && onsetTarget) {
+  if (frame.onset && frame.hz > 0 && !state.activeStringId) {
     const target = state.manualTargetStringId
       ? preset.strings.find((s) => s.id === state.manualTargetStringId)
       : undefined;
-    const activeLocked =
-      state.activeStringId !== null &&
-      state.strings[state.activeStringId]?.lockedInThisSession === true;
-    if (!state.activeStringId || (activeLocked && onsetTarget.id !== state.activeStringId)) {
-      latchString(state, (target ?? onsetTarget).id, nowMs, 100, true);
-    }
+    const detected = target ? null : likelyFrameString(state, preset);
+    const nearest = target ?? detected?.stringDef ?? nearestPresetStringByLogDistance(frame.hz, preset);
+    latchString(state, nearest.id, nowMs, 100);
   } else if (frame.hz > 0 && !state.activeStringId && highConfidence) {
     // Acquire by probe only when we have high-confidence evidence.
     if (state.manualTargetStringId) {

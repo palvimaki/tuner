@@ -4,7 +4,6 @@ const TARGET_SEARCH_CENTS = 140;
 const TARGET_MAX_CMNDF = 0.45;
 const RAW_RELATION_MAX_CENTS = 45;
 const MAX_HARMONIC_RELATION = 4;
-const PROFILE_FLOOR_DB = -180;
 
 export interface TargetAwarePitchInput {
   rawHz: number;
@@ -38,13 +37,6 @@ function parabolicTau(d: ArrayLike<number>, tau: number): number {
   const denom = s0 + s2 - 2 * s1;
   if (denom === 0) return tau;
   return t + (s0 - s2) / (2 * denom);
-}
-
-function cmndAtHz(cmnd: ArrayLike<number>, sampleRate: number, hz: number): number {
-  if (hz <= 0) return 1;
-  const tau = Math.round(sampleRate / hz);
-  if (tau <= 0 || tau >= cmnd.length) return 1;
-  return cmnd[tau] ?? 1;
 }
 
 function localTargetPitch(cmnd: ArrayLike<number>, sampleRate: number, targetHz: number) {
@@ -104,16 +96,6 @@ function rawRelation(rawHz: number, candidateHz: number, targetHz: number) {
   };
 }
 
-function displayHzFromRelation(
-  rawHz: number,
-  candidateHz: number,
-  relation: NonNullable<ReturnType<typeof rawRelation>>,
-): number {
-  if (relation.kind === "harmonic") return rawHz / relation.multiple;
-  if (relation.kind === "subharmonic") return rawHz * relation.multiple;
-  return rawHz;
-}
-
 export function resolveTargetAwarePitch(input: TargetAwarePitchInput): TargetAwarePitchResult {
   if (input.rawHz <= 0 || input.targets.length === 0) {
     return {
@@ -127,8 +109,8 @@ export function resolveTargetAwarePitch(input: TargetAwarePitchInput): TargetAwa
   }
 
   const bestProfileScore = input.targets.reduce(
-    (best, target) => Math.max(best, input.profileScores[target.id] ?? PROFILE_FLOOR_DB),
-    PROFILE_FLOOR_DB,
+    (best, target) => Math.max(best, input.profileScores[target.id] ?? -120),
+    -120,
   );
 
   const candidates: Array<TargetAwarePitchResult & { score: number; profileScore: number; targetHz: number }> = [];
@@ -154,7 +136,7 @@ export function resolveTargetAwarePitch(input: TargetAwarePitchInput): TargetAwa
       const relation = rawRelation(input.rawHz, candidate.hz, target.hz);
       if (!relation) continue;
 
-      const profileScore = input.profileScores[target.id] ?? PROFILE_FLOOR_DB;
+      const profileScore = input.profileScores[target.id] ?? -120;
       const profileDeficit = Math.max(0, bestProfileScore - profileScore);
       const score =
         Math.abs(targetCents) +
@@ -162,19 +144,11 @@ export function resolveTargetAwarePitch(input: TargetAwarePitchInput): TargetAwa
         relation.cents * 0.5 +
         profileDeficit * 4 +
         candidate.cmndAtTau * 35;
-      const displayHz = displayHzFromRelation(input.rawHz, candidate.hz, relation);
-      if (displayHz <= 0) continue;
-      const displayTargetCents = centsBetween(displayHz, target.hz);
-      if (Math.abs(displayTargetCents) > TARGET_SEARCH_CENTS) continue;
-      const displayCmndAtTau =
-        relation.kind === "direct"
-          ? input.rawCmndAtTau
-          : cmndAtHz(input.cmnd, input.sampleRate, displayHz);
 
       candidates.push({
-        hz: displayHz,
-        confidence: Math.max(0, Math.min(1, 1 - displayCmndAtTau)),
-        cmndAtTau: displayCmndAtTau,
+        hz: candidate.hz,
+        confidence: candidate.confidence,
+        cmndAtTau: candidate.cmndAtTau,
         targetId: target.id,
         relation: relation.kind,
         relationMultiple: relation.multiple,

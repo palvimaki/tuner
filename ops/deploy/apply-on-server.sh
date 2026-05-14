@@ -258,7 +258,6 @@ EOF_TUNER_VHOST
 
 sudo chown root:root /etc/nginx/njs/tuner-log.js /etc/nginx/conf.d/tuner.fi-privacy-log.conf /etc/nginx/sites-available/tuner.fi
 sudo chmod 0644 /etc/nginx/njs/tuner-log.js /etc/nginx/conf.d/tuner.fi-privacy-log.conf /etc/nginx/sites-available/tuner.fi
-sudo ln -sfn /etc/nginx/sites-available/tuner.fi /etc/nginx/sites-enabled/tuner.fi
 
 sudo nginx -t
 sudo systemctl reload nginx

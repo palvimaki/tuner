@@ -4,6 +4,7 @@ const TARGET_SEARCH_CENTS = 140;
 const TARGET_MAX_CMNDF = 0.45;
 const RAW_RELATION_MAX_CENTS = 45;
 const MAX_HARMONIC_RELATION = 4;
+const PROFILE_FLOOR_DB = -180;
 
 export interface TargetAwarePitchInput {
   rawHz: number;
@@ -109,8 +110,8 @@ export function resolveTargetAwarePitch(input: TargetAwarePitchInput): TargetAwa
   }
 
   const bestProfileScore = input.targets.reduce(
-    (best, target) => Math.max(best, input.profileScores[target.id] ?? -120),
-    -120,
+    (best, target) => Math.max(best, input.profileScores[target.id] ?? PROFILE_FLOOR_DB),
+    PROFILE_FLOOR_DB,
   );
 
   const candidates: Array<TargetAwarePitchResult & { score: number; profileScore: number; targetHz: number }> = [];
@@ -136,7 +137,7 @@ export function resolveTargetAwarePitch(input: TargetAwarePitchInput): TargetAwa
       const relation = rawRelation(input.rawHz, candidate.hz, target.hz);
       if (!relation) continue;
 
-      const profileScore = input.profileScores[target.id] ?? -120;
+      const profileScore = input.profileScores[target.id] ?? PROFILE_FLOOR_DB;
       const profileDeficit = Math.max(0, bestProfileScore - profileScore);
       const score =
         Math.abs(targetCents) +

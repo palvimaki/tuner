@@ -404,6 +404,92 @@ describe("session lock and completion", () => {
     expect(effect.lockedStringId).toBe("E4");
   });
 
+  it("admits moderate-confidence corrected harmonic frames without dropping the active string", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "E4";
+    state.mode = "latched";
+    state.lastGoodFrameAtMs = 0;
+
+    const effect = applyAnalysisFrame(
+      state,
+      {
+        hz: 329.628,
+        rawHz: 659.256,
+        clarity: 0.56,
+        confidence: 0.56,
+        rmsDb: -17,
+        shortRmsDb: -17,
+        slowRmsDb: -30,
+        onset: false,
+        variance: 1e-3,
+        amplitude: 0.2,
+        sampleWindow: 2048,
+        profileScores: {
+          E2: -33,
+          A2: -28,
+          D3: -24,
+          G3: -18,
+          B3: -14,
+          E4: -4,
+        },
+        stableTail: true,
+        debug: {
+          targetStringId: "E4",
+          targetRelation: "subharmonic",
+          targetRelationMultiple: 2,
+        },
+        timestampMs: 0,
+      },
+      preset,
+      3_000,
+    );
+
+    expect(effect.lockedStringId).toBeNull();
+    expect(state.activeStringId).toBe("E4");
+    expect(state.lastGoodFrameAtMs).toBe(3_000);
+    expect(Math.abs(state.strings.E4.cents ?? Infinity)).toBeLessThan(1);
+  });
+
+  it("clears stale active strings on ordinary low-confidence frames", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "E4";
+    state.mode = "latched";
+    state.lastGoodFrameAtMs = 0;
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: 329.628,
+        clarity: 0.56,
+        confidence: 0.56,
+        rmsDb: -17,
+        shortRmsDb: -17,
+        slowRmsDb: -30,
+        onset: false,
+        variance: 1e-3,
+        amplitude: 0.2,
+        sampleWindow: 2048,
+        profileScores: {
+          E2: -33,
+          A2: -28,
+          D3: -24,
+          G3: -18,
+          B3: -14,
+          E4: -4,
+        },
+        timestampMs: 0,
+      },
+      preset,
+      3_000,
+    );
+
+    expect(state.activeStringId).toBeNull();
+    expect(state.mode).toBe("probing");
+    expect(state.lastGoodFrameAtMs).toBe(0);
+  });
+
   it("does not lock an uncorrected harmonic as if it were the target F0", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);

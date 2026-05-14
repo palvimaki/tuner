@@ -29,20 +29,31 @@ assert_status() {
   fi
 }
 
-: "${DEPLOY_HOST:?Set DEPLOY_HOST to the SSH alias for the production server}"
+DEPLOY_HOST="${DEPLOY_HOST:-haukka}"
 : "${DEPLOY_PATH:=/var/www/tuner.fi/}"
+DEPLOY_URL="${DEPLOY_URL:-}"
+if [[ -z "$DEPLOY_URL" ]]; then
+  if [[ "$DEPLOY_HOST" == "haukka" ]]; then
+    DEPLOY_URL="https://tuner.fi"
+  else
+    echo "Set DEPLOY_URL to the public URL being deployed, e.g. https://tuner.fi" >&2
+    exit 2
+  fi
+fi
+DEPLOY_URL="${DEPLOY_URL%/}"
+RSYNC_EXCLUDES=(--exclude '.DS_Store' --exclude '.well-known/')
 
 npm ci
 npm run test
 npm run build
 
 if [[ "${1:-}" == "--dry-run" ]]; then
-  rsync -az --delete --exclude '.DS_Store' --dry-run dist/ "${DEPLOY_HOST}:${DEPLOY_PATH}"
+  rsync -az --delete "${RSYNC_EXCLUDES[@]}" --dry-run dist/ "${DEPLOY_HOST}:${DEPLOY_PATH}"
   exit 0
 fi
 
-rsync -az --delete --exclude '.DS_Store' dist/ "${DEPLOY_HOST}:${DEPLOY_PATH}"
-curl -fsS https://tuner.fi/ >/dev/null
+rsync -az --delete "${RSYNC_EXCLUDES[@]}" dist/ "${DEPLOY_HOST}:${DEPLOY_PATH}"
+curl -fsS "${DEPLOY_URL}/" >/dev/null
 
 hashed_js_path="$(
   node --input-type=module -e '
@@ -56,9 +67,9 @@ hashed_js_path="$(
   '
 )"
 
-assert_content_type "https://tuner.fi/sw.js" "javascript"
-assert_content_type "https://tuner.fi${hashed_js_path}" "javascript"
-assert_status "https://tuner.fi/audio/guitar/E2.m4a" "404"
-assert_status "https://tuner.fi/assets/does-not-exist.js" "404"
-assert_status "https://tuner.fi/.env" "404"
-assert_status "https://tuner.fi/.DS_Store" "404"
+assert_content_type "${DEPLOY_URL}/sw.js" "javascript"
+assert_content_type "${DEPLOY_URL}${hashed_js_path}" "javascript"
+assert_status "${DEPLOY_URL}/audio/guitar/E2.m4a" "404"
+assert_status "${DEPLOY_URL}/assets/does-not-exist.js" "404"
+assert_status "${DEPLOY_URL}/.env" "404"
+assert_status "${DEPLOY_URL}/.DS_Store" "404"

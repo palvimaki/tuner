@@ -10,6 +10,8 @@ export const LOW_STRING_LOCK_TOLERANCE_CENTS = 11;
 export const LOW_STRING_LOCK_HZ = 90;
 export const HIGH_CONFIDENCE_CLARITY = 0.9;
 export const HIGH_CONFIDENCE_RMS_DB = -45;
+const DIRECT_FRAME_MIN_CONFIDENCE = 0.7;
+const CORRECTED_FRAME_MIN_CONFIDENCE = 0.55;
 const PROFILE_PENALTY_CENTS_PER_DB = 5;
 const PROFILE_PENALTY_MAX_CENTS = 120;
 
@@ -107,7 +109,23 @@ export function nearestPresetStringByLogDistance(
 }
 
 function frameAdmitted(frame: AnalysisFrame): boolean {
-  return frame.rmsDb >= -55 && frame.clarity >= 0.82 && Object.keys(frame.profileScores).length > 0;
+  const correctedTarget =
+    frame.debug?.targetStringId &&
+    frame.debug.targetRelation !== undefined &&
+    frame.debug.targetRelation !== null &&
+    frame.debug.targetRelation !== "direct";
+  const pitchConfidence = typeof frame.confidence === "number" ? frame.confidence : frame.clarity;
+  const minConfidence =
+    typeof frame.confidence === "number"
+      ? correctedTarget
+        ? CORRECTED_FRAME_MIN_CONFIDENCE
+        : DIRECT_FRAME_MIN_CONFIDENCE
+      : 0.82;
+  return (
+    frame.rmsDb >= -55 &&
+    pitchConfidence >= minConfidence &&
+    Object.keys(frame.profileScores).length > 0
+  );
 }
 
 function frameTransient(frame: AnalysisFrame): boolean {
@@ -118,7 +136,7 @@ function frameTransient(frame: AnalysisFrame): boolean {
 function frameHighConfidence(frame: AnalysisFrame): boolean {
   if (frame.lowConfidence === true) return false;
   if (typeof frame.confidence === "number") {
-    return frame.confidence >= 0.7;
+    return frame.confidence >= DIRECT_FRAME_MIN_CONFIDENCE;
   }
   return frame.clarity >= HIGH_CONFIDENCE_CLARITY && frame.rmsDb >= HIGH_CONFIDENCE_RMS_DB;
 }

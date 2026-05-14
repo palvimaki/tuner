@@ -17,6 +17,7 @@ const TARGET_SEARCH_CENTS = 140;
 const TARGET_MAX_CMNDF = 0.45;
 const RAW_RELATION_MAX_CENTS = 45;
 const MAX_HARMONIC_RELATION = 4;
+const PROFILE_FLOOR_DB = -180;
 
 function toDb(value) {
   return 20 * Math.log10(Math.max(value, 1e-9));
@@ -182,8 +183,8 @@ function resolveTargetAwarePitch(yin, sampleRate, targets, profileScores) {
   }
 
   const bestProfileScore = targets.reduce((best, target) => {
-    return Math.max(best, profileScores[target.id] ?? -120);
-  }, -120);
+    return Math.max(best, profileScores[target.id] ?? PROFILE_FLOOR_DB);
+  }, PROFILE_FLOOR_DB);
 
   const candidates = [];
   for (const target of targets) {
@@ -208,7 +209,7 @@ function resolveTargetAwarePitch(yin, sampleRate, targets, profileScores) {
       const relation = rawRelation(yin.hz, candidate.hz, target.hz);
       if (!relation) continue;
 
-      const profileScore = profileScores[target.id] ?? -120;
+      const profileScore = profileScores[target.id] ?? PROFILE_FLOOR_DB;
       const profileDeficit = Math.max(0, bestProfileScore - profileScore);
       const score =
         Math.abs(targetCents) +
@@ -373,16 +374,16 @@ class TunerProcessor extends AudioWorkletProcessor {
         .filter((candidate) => candidate.hz > target.hz);
       const penalty =
         lowerSameNoteTargets.length === 0
-          ? -120
+          ? PROFILE_FLOOR_DB
           : lowerSameNoteTargets.reduce((max, candidate) => {
               return Math.max(max, bandDb(signal, sampleRate, candidate.hz));
-            }, -120);
+            }, PROFILE_FLOOR_DB);
       const upperPenalty =
         upperSameNoteTargets.length === 0
-          ? -120
+          ? PROFILE_FLOOR_DB
           : upperSameNoteTargets.reduce((max, candidate) => {
               return Math.max(max, bandDb(signal, sampleRate, candidate.hz));
-            }, -120);
+            }, PROFILE_FLOOR_DB);
       const fundamentalMag = bandMagnitude(signal, sampleRate, target.hz);
       const secondMag = bandMagnitude(signal, sampleRate, target.hz * 2);
       const thirdMag = bandMagnitude(signal, sampleRate, target.hz * 3);
@@ -501,10 +502,10 @@ class TunerProcessor extends AudioWorkletProcessor {
       : [...this.hzHistory].sort((a, b) => a - b)[Math.floor(this.hzHistory.length / 2)];
 
     // Stable-tail: last N raw frames within STABLE_TAIL_CENTS of one another.
-    if (correctedHz > 0 && !transientSuppressed) {
-      this.recentHz.push(correctedHz);
+    if (rawHz > 0 && correctedHz > 0 && !transientSuppressed) {
+      this.recentHz.push(rawHz);
       if (this.recentHz.length > STABLE_TAIL_FRAMES) this.recentHz.shift();
-    } else if (transientSuppressed || correctedHz <= 0) {
+    } else if (transientSuppressed || rawHz <= 0 || correctedHz <= 0) {
       this.recentHz = [];
     }
     let stableTail = false;

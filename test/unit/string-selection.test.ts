@@ -107,7 +107,7 @@ describe("string switching hysteresis", () => {
     expect(state.mode).toBe("latched");
   });
 
-  it("acquires high E when the pitch detector reports an upper harmonic", () => {
+  it("acquires high E when the worklet corrected an upper-harmonic detector hit", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);
 
@@ -115,7 +115,8 @@ describe("string switching hysteresis", () => {
       applyAnalysisFrame(
         state,
         {
-          hz: 988.884,
+          hz: 329.628,
+          rawHz: 988.884,
           clarity: 0.93,
           rmsDb: -18,
           shortRmsDb: -18,
@@ -178,7 +179,7 @@ describe("string switching hysteresis", () => {
     expect(state.activeStringId).toBe("E4");
   });
 
-  it("acquires low E when the detector reports the low-E third harmonic near B", () => {
+  it("acquires low E when the worklet corrected a third-harmonic detector hit near B", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);
     const lowEHz = 82.4069;
@@ -194,7 +195,8 @@ describe("string switching hysteresis", () => {
     applyAnalysisFrame(
       state,
       {
-        hz: lowEHz * 3,
+        hz: lowEHz,
+        rawHz: lowEHz * 3,
         clarity: 0.96,
         rmsDb: -18,
         shortRmsDb: -18,
@@ -232,7 +234,8 @@ describe("string switching hysteresis", () => {
       applyAnalysisFrame(
         state,
         {
-          hz: lowEHz * 3,
+          hz: lowEHz,
+          rawHz: lowEHz * 3,
           clarity: 0.96,
           rmsDb: -18,
           shortRmsDb: -18,
@@ -255,7 +258,8 @@ describe("string switching hysteresis", () => {
     applyAnalysisFrame(
       state,
       {
-        hz: lowEHz * 3,
+        hz: lowEHz,
+        rawHz: lowEHz * 3,
         clarity: 0.96,
         rmsDb: -18,
         shortRmsDb: -18,
@@ -276,7 +280,7 @@ describe("string switching hysteresis", () => {
     expect(state.strings.B3.lockedInThisSession).toBe(false);
   });
 
-  it("does not override a manual B target with low-E harmonic evidence", () => {
+  it("does not override a manual B target with corrected low-E evidence", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);
     const lowEHz = 82.4069;
@@ -294,7 +298,8 @@ describe("string switching hysteresis", () => {
       applyAnalysisFrame(
         state,
         {
-          hz: lowEHz * 3,
+          hz: lowEHz,
+          rawHz: lowEHz * 3,
           clarity: 0.96,
           rmsDb: -18,
           shortRmsDb: -18,
@@ -505,7 +510,7 @@ describe("string switching hysteresis", () => {
     expect(state.activeStringId).toBe("E4");
   });
 
-  it("switches from B to high E when the detector reports the lower octave", () => {
+  it("switches from B to high E when the worklet corrected a lower-octave detector hit", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);
     state.activeStringId = "B3";
@@ -515,7 +520,8 @@ describe("string switching hysteresis", () => {
       applyAnalysisFrame(
         state,
         {
-          hz: 164.814,
+          hz: 329.628,
+          rawHz: 164.814,
           clarity: 0.93,
           rmsDb: -18,
           shortRmsDb: -18,
@@ -618,7 +624,7 @@ describe("string switching hysteresis", () => {
     expect(state.strings.E4.lockStartedMs).toBeNull();
   });
 
-  it("holds high E through third-harmonic frames that resemble B", () => {
+  it("holds high E through corrected third-harmonic frames that resemble B", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);
     state.activeStringId = "E4";
@@ -628,7 +634,8 @@ describe("string switching hysteresis", () => {
       applyAnalysisFrame(
         state,
         {
-          hz: 988.884,
+          hz: 329.628,
+          rawHz: 988.884,
           clarity: 0.94,
           rmsDb: -18,
           shortRmsDb: -18,

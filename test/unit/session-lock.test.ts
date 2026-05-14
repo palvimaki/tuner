@@ -774,6 +774,134 @@ describe("session lock and completion", () => {
     expect(state.activeStringId).toBe("A2");
   });
 
+  it("clears stale cents when a locked string hands off on a new onset", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "G3";
+    state.mode = "latched";
+    state.strings.G3.lockedInThisSession = true;
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: 195.9977,
+        clarity: 0.96,
+        confidence: 0.96,
+        rmsDb: -18,
+        shortRmsDb: -18,
+        slowRmsDb: -32,
+        onset: false,
+        variance: 1e-3,
+        amplitude: 0.2,
+        sampleWindow: 4096,
+        profileScores: {
+          E2: -34,
+          A2: -28,
+          D3: -20,
+          G3: -6,
+          B3: -20,
+          E4: -30,
+        },
+        stableTail: true,
+        timestampMs: 0,
+      },
+      preset,
+      0,
+    );
+
+    expect(state.strings.D3.cents ?? 0).toBeGreaterThan(400);
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: 146.8324,
+        clarity: 0.96,
+        confidence: 0.96,
+        rmsDb: -17,
+        shortRmsDb: -17,
+        slowRmsDb: -32,
+        onset: true,
+        variance: 1e-3,
+        amplitude: 0.35,
+        sampleWindow: 4096,
+        profileScores: {
+          E2: -32,
+          A2: -24,
+          D3: -6,
+          G3: -22,
+          B3: -31,
+          E4: -38,
+        },
+        stableTail: false,
+        transientSuppressed: true,
+        debug: {
+          targetStringId: "D3",
+          targetRelation: "direct",
+          targetRelationMultiple: 1,
+        },
+        timestampMs: 0,
+      },
+      preset,
+      220,
+    );
+
+    expect(state.activeStringId).toBe("D3");
+    expect(state.strings.D3.cents).toBeNull();
+    expect(state.strings.D3.instantCents).toBeNull();
+  });
+
+  it("starts a fresh lock session on the next onset after completion", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.mode = "completed";
+    state.activeStringId = "E4";
+    state.completedAtMs = 1_000;
+    for (const stringDef of preset.strings) {
+      state.strings[stringDef.id].lockedInThisSession = true;
+      state.strings[stringDef.id].lockedAtMs = 900;
+    }
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: 82.4069,
+        clarity: 0.96,
+        confidence: 0.96,
+        rmsDb: -17,
+        shortRmsDb: -17,
+        slowRmsDb: -32,
+        onset: true,
+        variance: 1e-3,
+        amplitude: 0.35,
+        sampleWindow: 4096,
+        profileScores: {
+          E2: -6,
+          A2: -20,
+          D3: -26,
+          G3: -30,
+          B3: -34,
+          E4: -39,
+        },
+        stableTail: false,
+        transientSuppressed: true,
+        debug: {
+          targetStringId: "E2",
+          targetRelation: "direct",
+          targetRelationMultiple: 1,
+        },
+        timestampMs: 0,
+      },
+      preset,
+      1_800,
+    );
+
+    expect(state.completedAtMs).toBeNull();
+    expect(state.mode).toBe("latched");
+    expect(state.activeStringId).toBe("E2");
+    expect(state.strings.E2.lockedInThisSession).toBe(false);
+    expect(state.strings.A2.lockedInThisSession).toBe(false);
+  });
+
   it("does not lock an uncorrected harmonic as if it were the target F0", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);

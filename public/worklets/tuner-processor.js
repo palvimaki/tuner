@@ -367,13 +367,21 @@ class TunerProcessor extends AudioWorkletProcessor {
     this.analysisCounter = 0;
     this.hzHistory = [];
     this.recentHz = [];
+    this.lastTargetId = null;
     this.port.onmessage = (event) => {
       if (event.data?.type === "config") {
         this.targets = event.data.targets ?? this.targets;
         this.onsetThresholdDb = event.data.onsetThresholdDb ?? this.onsetThresholdDb;
         this.onsetDebounceMs = event.data.onsetDebounceMs ?? this.onsetDebounceMs;
+        this.resetPitchTracking();
       }
     };
+  }
+
+  resetPitchTracking() {
+    this.hzHistory = [];
+    this.recentHz = [];
+    this.lastTargetId = null;
   }
 
   copyWindow(size) {
@@ -512,18 +520,28 @@ class TunerProcessor extends AudioWorkletProcessor {
 
     const rawHz = yin.hz;
     const correctedHz = f0CandidateHz;
-    if (correctedHz > 0 && !transientSuppressed) {
-      if (onset) this.hzHistory = [correctedHz];
-      else {
-        this.hzHistory.push(correctedHz);
-        if (this.hzHistory.length > 3) this.hzHistory.shift();
-      }
-    } else if (!correctedHz) {
+    const correctedTargetId = corrected.targetId ?? null;
+    const targetChanged =
+      correctedTargetId !== null &&
+      this.lastTargetId !== null &&
+      correctedTargetId !== this.lastTargetId;
+    if (onset || targetChanged) {
       this.hzHistory = [];
+      this.recentHz = [];
     }
-    const hz = this.hzHistory.length === 0
+    if (correctedHz > 0 && !transientSuppressed) {
+      this.hzHistory.push(correctedHz);
+      if (this.hzHistory.length > 3) this.hzHistory.shift();
+    } else if (!correctedHz) {
+      this.resetPitchTracking();
+    }
+    if (correctedTargetId !== null && correctedHz > 0) {
+      this.lastTargetId = correctedTargetId;
+    }
+    const historyHz = this.hzHistory.length === 0
       ? 0
       : [...this.hzHistory].sort((a, b) => a - b)[Math.floor(this.hzHistory.length / 2)];
+    const hz = transientSuppressed ? correctedHz : historyHz;
 
     // Stable-tail: last N raw frames within STABLE_TAIL_CENTS of one another.
     if (rawHz > 0 && correctedHz > 0 && !transientSuppressed) {

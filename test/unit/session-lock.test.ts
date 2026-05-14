@@ -490,6 +490,290 @@ describe("session lock and completion", () => {
     expect(state.lastGoodFrameAtMs).toBe(0);
   });
 
+  it("does not let rejected low-confidence pitch artifacts move the visible dot", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "E2";
+    state.mode = "latched";
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: 82.4069,
+        clarity: 0.96,
+        confidence: 0.96,
+        rmsDb: -18,
+        shortRmsDb: -18,
+        slowRmsDb: -32,
+        onset: false,
+        variance: 1e-3,
+        amplitude: 0.2,
+        sampleWindow: 4096,
+        profileScores: {
+          E2: -6,
+          A2: -20,
+          D3: -26,
+          G3: -30,
+          B3: -34,
+          E4: -39,
+        },
+        stableTail: true,
+        timestampMs: 0,
+      },
+      preset,
+      0,
+    );
+
+    const centered = state.strings.E2.cents;
+    applyAnalysisFrame(
+      state,
+      {
+        hz: hzAtCents(82.4069, 95),
+        clarity: 0.52,
+        confidence: 0.52,
+        rmsDb: -18,
+        shortRmsDb: -18,
+        slowRmsDb: -32,
+        onset: false,
+        variance: 1e-3,
+        amplitude: 0.18,
+        sampleWindow: 4096,
+        profileScores: {
+          E2: -6,
+          A2: -20,
+          D3: -26,
+          G3: -30,
+          B3: -34,
+          E4: -39,
+        },
+        stableTail: true,
+        timestampMs: 0,
+      },
+      preset,
+      100,
+    );
+
+    expect(Math.abs(centered ?? Infinity)).toBeLessThan(1);
+    expect(Math.abs(state.strings.E2.cents ?? Infinity)).toBeLessThan(1);
+    expect(Math.abs(state.strings.E2.instantCents ?? Infinity)).toBeLessThan(1);
+  });
+
+  it("does not let transient-suppressed attack frames move the visible dot", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "E2";
+    state.mode = "latched";
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: 82.4069,
+        clarity: 0.96,
+        confidence: 0.96,
+        rmsDb: -18,
+        shortRmsDb: -18,
+        slowRmsDb: -32,
+        onset: false,
+        variance: 1e-3,
+        amplitude: 0.2,
+        sampleWindow: 4096,
+        profileScores: {
+          E2: -6,
+          A2: -20,
+          D3: -26,
+          G3: -30,
+          B3: -34,
+          E4: -39,
+        },
+        stableTail: true,
+        timestampMs: 0,
+      },
+      preset,
+      0,
+    );
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: hzAtCents(82.4069, 95),
+        clarity: 0.98,
+        confidence: 0.98,
+        rmsDb: -16,
+        shortRmsDb: -16,
+        slowRmsDb: -32,
+        onset: true,
+        variance: 1e-3,
+        amplitude: 0.4,
+        sampleWindow: 4096,
+        profileScores: {
+          E2: -6,
+          A2: -20,
+          D3: -26,
+          G3: -30,
+          B3: -34,
+          E4: -39,
+        },
+        stableTail: false,
+        transientSuppressed: true,
+        timestampMs: 0,
+      },
+      preset,
+      120,
+    );
+
+    expect(Math.abs(state.strings.E2.cents ?? Infinity)).toBeLessThan(1);
+    expect(Math.abs(state.strings.E2.instantCents ?? Infinity)).toBeLessThan(1);
+  });
+
+  it("clears stale pitch state when silence clears the active string", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "E2";
+    state.mode = "latched";
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: 82.4069,
+        clarity: 0.96,
+        confidence: 0.96,
+        rmsDb: -18,
+        shortRmsDb: -18,
+        slowRmsDb: -32,
+        onset: false,
+        variance: 1e-3,
+        amplitude: 0.2,
+        sampleWindow: 4096,
+        profileScores: {
+          E2: -6,
+          A2: -20,
+          D3: -26,
+          G3: -30,
+          B3: -34,
+          E4: -39,
+        },
+        stableTail: true,
+        timestampMs: 0,
+      },
+      preset,
+      0,
+    );
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: 0,
+        clarity: 0,
+        confidence: 0,
+        rmsDb: -80,
+        shortRmsDb: -80,
+        slowRmsDb: -80,
+        onset: false,
+        variance: 0,
+        amplitude: 0,
+        sampleWindow: 4096,
+        profileScores: {},
+        timestampMs: 0,
+      },
+      preset,
+      2_600,
+    );
+
+    expect(state.activeStringId).toBeNull();
+    for (const stringState of Object.values(state.strings)) {
+      expect(stringState.rawCents).toBeNull();
+      expect(stringState.instantCents).toBeNull();
+      expect(stringState.cents).toBeNull();
+      expect(stringState.pitchPenaltyCents).toBe(0);
+    }
+  });
+
+  it("acquires the next string on onset after silence cleared stale pitch state", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "E2";
+    state.mode = "latched";
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: 82.4069,
+        clarity: 0.96,
+        confidence: 0.96,
+        rmsDb: -18,
+        shortRmsDb: -18,
+        slowRmsDb: -32,
+        onset: false,
+        variance: 1e-3,
+        amplitude: 0.2,
+        sampleWindow: 4096,
+        profileScores: {
+          E2: -6,
+          A2: -20,
+          D3: -26,
+          G3: -30,
+          B3: -34,
+          E4: -39,
+        },
+        stableTail: true,
+        timestampMs: 0,
+      },
+      preset,
+      0,
+    );
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: 0,
+        clarity: 0,
+        confidence: 0,
+        rmsDb: -80,
+        shortRmsDb: -80,
+        slowRmsDb: -80,
+        onset: false,
+        variance: 0,
+        amplitude: 0,
+        sampleWindow: 4096,
+        profileScores: {},
+        timestampMs: 0,
+      },
+      preset,
+      2_600,
+    );
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: 110,
+        clarity: 0.98,
+        confidence: 0.98,
+        rmsDb: -16,
+        shortRmsDb: -16,
+        slowRmsDb: -32,
+        onset: true,
+        variance: 1e-3,
+        amplitude: 0.35,
+        sampleWindow: 4096,
+        profileScores: {
+          E2: -28,
+          A2: -6,
+          D3: -24,
+          G3: -30,
+          B3: -34,
+          E4: -39,
+        },
+        stableTail: false,
+        transientSuppressed: true,
+        timestampMs: 0,
+      },
+      preset,
+      2_760,
+    );
+
+    expect(state.activeStringId).toBe("A2");
+  });
+
   it("does not lock an uncorrected harmonic as if it were the target F0", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);

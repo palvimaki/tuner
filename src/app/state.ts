@@ -160,8 +160,13 @@ function hydrateFrameLevels(state: AppState, frame: AnalysisFrame, preset: Tunin
 }
 
 function hydrateFramePitchIntoStrings(state: AppState, frame: AnalysisFrame, preset: TuningPreset): void {
+  const pitchTarget = frameTargetString(frame, preset);
   for (const stringDef of preset.strings) {
     const targetState = state.strings[stringDef.id];
+    if (pitchTarget?.id !== stringDef.id) {
+      if (!targetState.lockedInThisSession) resetStringPitch(targetState);
+      continue;
+    }
     if (frame.hz > 0) {
       const tuningCents = tuningCentsFromHz(frame.hz, resolveStringTargetHz(stringDef));
       targetState.rawCents = tuningCents.rawCents;
@@ -228,11 +233,13 @@ function likelyFrameString(
       const stringState = state.strings[stringDef.id];
       return {
         stringDef,
+        locked: stringState.lockedInThisSession,
         scoreDb: stringState.scoreDb,
         pitchDistance: weightedPitchDistance(stringState, frameBestScoreDb),
         basePitchDistance: candidatePitchDistance(stringState),
       };
     })
+    .filter((candidate) => !candidate.locked)
     .filter((candidate) => candidate.basePitchDistance <= 120);
 
   const ranked = candidates
@@ -267,6 +274,7 @@ function bestChallenger(
   const frameBestScoreDb = bestProfileScore(state);
   const candidates = preset.strings
     .filter((stringDef) => stringDef.id !== active.id)
+    .filter((stringDef) => !state.strings[stringDef.id].lockedInThisSession)
     .map((stringDef) => {
       const stringState = state.strings[stringDef.id];
       return {

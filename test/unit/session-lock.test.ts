@@ -558,6 +558,94 @@ describe("session lock and completion", () => {
     expect(Math.abs(state.strings.E2.instantCents ?? Infinity)).toBeLessThan(1);
   });
 
+  it("does not paint another detected string's pitch onto the active string", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "G3";
+    state.mode = "latched";
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: 246.9417,
+        clarity: 0.96,
+        confidence: 0.96,
+        rmsDb: -18,
+        shortRmsDb: -18,
+        slowRmsDb: -32,
+        onset: false,
+        variance: 1e-3,
+        amplitude: 0.2,
+        sampleWindow: 2048,
+        profileScores: {
+          E2: -36,
+          A2: -30,
+          D3: -24,
+          G3: -22,
+          B3: -4,
+          E4: -18,
+        },
+        stableTail: true,
+        debug: {
+          targetStringId: "B3",
+          targetRelation: "direct",
+          targetRelationMultiple: 1,
+        },
+        timestampMs: 0,
+      },
+      preset,
+      200,
+    );
+
+    expect(state.activeStringId).toBe("G3");
+    expect(state.strings.G3.cents).toBeNull();
+    expect(state.strings.B3.cents).not.toBeNull();
+  });
+
+  it("does not let an already locked string steal the active string by challenger switching", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "G3";
+    state.mode = "latched";
+    state.strings.B3.lockedInThisSession = true;
+
+    const frame = {
+      hz: 246.9417,
+      clarity: 0.96,
+      confidence: 0.96,
+      rmsDb: -18,
+      shortRmsDb: -18,
+      slowRmsDb: -32,
+      onset: false,
+      variance: 1e-3,
+      amplitude: 0.2,
+      sampleWindow: 2048 as const,
+      profileScores: {
+        E2: -36,
+        A2: -30,
+        D3: -24,
+        G3: -22,
+        B3: -4,
+        E4: -18,
+      },
+      stableTail: true,
+      debug: {
+        targetStringId: "B3",
+        targetRelation: "direct" as const,
+        targetRelationMultiple: 1,
+      },
+      timestampMs: 0,
+    };
+
+    applyAnalysisFrame(state, frame, preset, 200);
+    applyAnalysisFrame(state, frame, preset, 240);
+    applyAnalysisFrame(state, frame, preset, 280);
+    applyAnalysisFrame(state, frame, preset, 320);
+
+    expect(state.activeStringId).toBe("G3");
+    expect(state.strings.G3.cents).toBeNull();
+  });
+
   it("does not let transient-suppressed attack frames move the visible dot", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);
@@ -809,7 +897,7 @@ describe("session lock and completion", () => {
       0,
     );
 
-    expect(state.strings.D3.cents ?? 0).toBeGreaterThan(400);
+    expect(state.strings.D3.cents).toBeNull();
 
     applyAnalysisFrame(
       state,

@@ -99,7 +99,7 @@ function cmndAtHz(cmnd, sampleRate, hz) {
 function displayHzFromRelation(rawHz, candidateHz, relation) {
   if (relation.kind === "harmonic") return rawHz / relation.multiple;
   if (relation.kind === "subharmonic") return rawHz * relation.multiple;
-  return candidateHz;
+  return rawHz;
 }
 
 function findPitchYIN(input, sampleRate) {
@@ -236,7 +236,7 @@ function resolveTargetAwarePitch(yin, sampleRate, targets, profileScores) {
       if (Math.abs(displayTargetCents) > TARGET_SEARCH_CENTS) continue;
       const displayCmndAtTau =
         relation.kind === "direct"
-          ? candidate.cmndAtTau
+          ? yin.cmndAtTau
           : cmndAtHz(yin.cmnd, sampleRate, displayHz);
 
       candidates.push({

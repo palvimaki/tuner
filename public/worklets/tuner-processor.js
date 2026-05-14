@@ -9,9 +9,15 @@
 const YIN_THRESHOLD = 0.15;
 const YIN_MIN_HZ = 55;
 const YIN_MAX_HZ = 1400;
+const HIGH_PASS_POLE = 0.996;
 const TRANSIENT_SUPPRESS_MS = 120;
 const STABLE_TAIL_CENTS = 25;
 const STABLE_TAIL_FRAMES = 3;
+const TARGET_SEARCH_CENTS = 140;
+const TARGET_MAX_CMNDF = 0.45;
+const RAW_RELATION_MAX_CENTS = 45;
+const MAX_HARMONIC_RELATION = 4;
+const PROFILE_FLOOR_DB = -180;
 
 function toDb(value) {
   return 20 * Math.log10(Math.max(value, 1e-9));
@@ -31,13 +37,21 @@ function goertzelMagnitude(signal, sampleRate, targetHz) {
   return Math.sqrt(Math.max(0, q1 * q1 + q2 * q2 - coeff * q1 * q2));
 }
 
-function bandDb(signal, sampleRate, hz) {
+function bandMagnitude(signal, sampleRate, hz) {
   const cents = [-25, 0, 25];
   let total = 0;
   for (const cent of cents) {
     total += goertzelMagnitude(signal, sampleRate, hz * 2 ** (cent / 1200));
   }
-  return toDb(total);
+  return total;
+}
+
+function bandDb(signal, sampleRate, hz) {
+  return toDb(bandMagnitude(signal, sampleRate, hz));
+}
+
+function centsBetween(hz, referenceHz) {
+  return 1200 * Math.log2(hz / referenceHz);
 }
 
 // ---- YIN ----
@@ -107,7 +121,138 @@ function findPitchYIN(input, sampleRate) {
   const refined = parabolicTau(cmnd, tauEst);
   const hz = refined > 0 ? sampleRate / refined : 0;
   const confidence = Math.max(0, Math.min(1, 1 - cmndAtTau));
-  return { hz, confidence, cmndAtTau };
+  return { hz, confidence, cmndAtTau, cmnd };
+}
+
+function localTargetPitch(cmnd, sampleRate, targetHz) {
+  const centerTau = sampleRate / targetHz;
+  const minTau = Math.max(2, Math.floor(centerTau * 2 ** (-TARGET_SEARCH_CENTS / 1200)));
+  const maxTau = Math.min(cmnd.length - 2, Math.ceil(centerTau * 2 ** (TARGET_SEARCH_CENTS / 1200)));
+  if (maxTau <= minTau) return null;
+
+  let bestTau = minTau;
+  let bestValue = cmnd[minTau] ?? 1;
+  for (let tau = minTau + 1; tau <= maxTau; tau += 1) {
+    const value = cmnd[tau] ?? 1;
+    if (value < bestValue) {
+      bestValue = value;
+      bestTau = tau;
+    }
+  }
+  if (bestValue > TARGET_MAX_CMNDF) return null;
+
+  const refinedTau = parabolicTau(cmnd, bestTau);
+  const hz = refinedTau > 0 ? sampleRate / refinedTau : 0;
+  if (hz <= 0) return null;
+
+  return {
+    hz,
+    cmndAtTau: bestValue,
+    confidence: Math.max(0, Math.min(1, 1 - bestValue)),
+  };
+}
+
+function rawRelation(rawHz, candidateHz, targetHz) {
+  if (rawHz <= 0 || candidateHz <= 0) return null;
+  if (rawHz >= candidateHz) {
+    const harmonic = Math.max(1, Math.round(rawHz / candidateHz));
+    if (harmonic > MAX_HARMONIC_RELATION) return null;
+    const cents = Math.abs(centsBetween(rawHz, candidateHz * harmonic));
+    if (cents > RAW_RELATION_MAX_CENTS) return null;
+    const lowString = targetHz < 100;
+    const penalty = harmonic === 1 ? 0 : lowString ? 35 + (harmonic - 2) * 10 : 22 + (harmonic - 2) * 12;
+    return { kind: harmonic === 1 ? "direct" : "harmonic", multiple: harmonic, cents, penalty };
+  }
+
+  const subharmonic = Math.round(candidateHz / rawHz);
+  if (subharmonic < 2 || subharmonic > MAX_HARMONIC_RELATION) return null;
+  const cents = Math.abs(centsBetween(rawHz * subharmonic, candidateHz));
+  if (cents > RAW_RELATION_MAX_CENTS) return null;
+  return { kind: "subharmonic", multiple: subharmonic, cents, penalty: 20 + (subharmonic - 2) * 12 };
+}
+
+function resolveTargetAwarePitch(yin, sampleRate, targets, profileScores) {
+  if (!yin || yin.hz <= 0 || !yin.cmnd || targets.length === 0) {
+    return {
+      hz: yin?.hz ?? 0,
+      confidence: yin?.confidence ?? 0,
+      cmndAtTau: yin?.cmndAtTau ?? 1,
+      targetId: null,
+      relation: null,
+    };
+  }
+
+  const bestProfileScore = targets.reduce((best, target) => {
+    return Math.max(best, profileScores[target.id] ?? PROFILE_FLOOR_DB);
+  }, PROFILE_FLOOR_DB);
+
+  const candidates = [];
+  for (const target of targets) {
+    const localCandidate = localTargetPitch(yin.cmnd, sampleRate, target.hz);
+    const rawTargetCents = centsBetween(yin.hz, target.hz);
+    const pitchCandidates = [
+      localCandidate,
+      Math.abs(rawTargetCents) <= TARGET_SEARCH_CENTS
+        ? {
+            hz: yin.hz,
+            cmndAtTau: yin.cmndAtTau,
+            confidence: yin.confidence,
+          }
+        : null,
+    ];
+
+    for (const candidate of pitchCandidates) {
+      if (!candidate) continue;
+      const targetCents = centsBetween(candidate.hz, target.hz);
+      if (Math.abs(targetCents) > TARGET_SEARCH_CENTS) continue;
+
+      const relation = rawRelation(yin.hz, candidate.hz, target.hz);
+      if (!relation) continue;
+
+      const profileScore = profileScores[target.id] ?? PROFILE_FLOOR_DB;
+      const profileDeficit = Math.max(0, bestProfileScore - profileScore);
+      const score =
+        Math.abs(targetCents) +
+        relation.penalty +
+        relation.cents * 0.5 +
+        profileDeficit * 4 +
+        candidate.cmndAtTau * 35;
+
+      candidates.push({
+        ...candidate,
+        score,
+        targetId: target.id,
+        relation,
+        profileScore,
+        targetHz: target.hz,
+      });
+    }
+  }
+
+  const direct = candidates
+    .filter((candidate) => candidate.relation.kind === "direct")
+    .sort((a, b) => a.score - b.score)[0];
+  const strongestNonDirect = candidates
+    .filter((candidate) => candidate.relation.kind !== "direct")
+    .sort((a, b) => a.score - b.score)[0];
+  const harmonicOverride =
+    direct &&
+    strongestNonDirect &&
+    strongestNonDirect.score + 12 <= direct.score;
+  const eligible = harmonicOverride && strongestNonDirect ? [strongestNonDirect] : direct ? [direct] : candidates;
+  const best = eligible.sort((a, b) => a.score - b.score)[0] ?? null;
+
+  if (!best) {
+    return {
+      hz: yin.hz,
+      confidence: yin.confidence,
+      cmndAtTau: yin.cmndAtTau,
+      targetId: null,
+      relation: null,
+    };
+  }
+
+  return best;
 }
 
 // ---- MPM (debug fallback only) ----
@@ -223,26 +368,45 @@ class TunerProcessor extends AudioWorkletProcessor {
         .filter((candidate) => candidate.id !== target.id)
         .filter((candidate) => candidate.id.slice(0, -1) === target.id.slice(0, -1))
         .filter((candidate) => candidate.hz < target.hz);
+      const upperSameNoteTargets = this.targets
+        .filter((candidate) => candidate.id !== target.id)
+        .filter((candidate) => candidate.id.slice(0, -1) === target.id.slice(0, -1))
+        .filter((candidate) => candidate.hz > target.hz);
       const penalty =
         lowerSameNoteTargets.length === 0
-          ? 0
+          ? PROFILE_FLOOR_DB
           : lowerSameNoteTargets.reduce((max, candidate) => {
               return Math.max(max, bandDb(signal, sampleRate, candidate.hz));
-            }, -120);
-      const fundamental = bandDb(signal, sampleRate, target.hz);
-      const second = bandDb(signal, sampleRate, target.hz * 2);
-      const third = bandDb(signal, sampleRate, target.hz * 3);
-      const fourth = bandDb(signal, sampleRate, target.hz * 4);
+            }, PROFILE_FLOOR_DB);
+      const upperPenalty =
+        upperSameNoteTargets.length === 0
+          ? PROFILE_FLOOR_DB
+          : upperSameNoteTargets.reduce((max, candidate) => {
+              return Math.max(max, bandDb(signal, sampleRate, candidate.hz));
+            }, PROFILE_FLOOR_DB);
+      const fundamentalMag = bandMagnitude(signal, sampleRate, target.hz);
+      const secondMag = bandMagnitude(signal, sampleRate, target.hz * 2);
+      const thirdMag = bandMagnitude(signal, sampleRate, target.hz * 3);
+      const fourthMag = bandMagnitude(signal, sampleRate, target.hz * 4);
+      const fundamental = toDb(fundamentalMag);
+      const second = toDb(secondMag);
+      const fourth = toDb(fourthMag);
       const missingFundamentalPenalty = Math.max(0, second - fundamental);
       const upperOctavePenalty = Math.max(0, fourth - second);
+      const lowerSameNotePenalty = Math.max(0, penalty - fundamental);
+      const directUpperSameNotePenalty = Math.max(0, upperPenalty - Math.max(fundamental, second));
+      const lowString = target.hz < 100;
+      const harmonicTotal =
+        (lowString ? 0.65 : 1) * fundamentalMag +
+        (lowString ? 0.6 : 0.45) * secondMag +
+        (lowString ? 0.38 : 0.2) * thirdMag +
+        (lowString ? 0.18 : 0.1) * fourthMag;
       scores[target.id] =
-        fundamental +
-        0.45 * second +
-        0.2 * third +
-        0.1 * fourth -
-        0.55 * penalty -
-        0.35 * missingFundamentalPenalty -
-        0.2 * upperOctavePenalty;
+        toDb(harmonicTotal) -
+        0.55 * lowerSameNotePenalty -
+        0.7 * directUpperSameNotePenalty -
+        (lowString ? 0.12 : 0.28) * missingFundamentalPenalty -
+        (lowString ? 0.2 : 0.55) * upperOctavePenalty;
     }
     return scores;
   }
@@ -254,7 +418,7 @@ class TunerProcessor extends AudioWorkletProcessor {
     if (!input) return true;
 
     for (let i = 0; i < input.length; i += 1) {
-      const hp = input[i] - this.hpPrevInput + 0.992 * this.hpState;
+      const hp = input[i] - this.hpPrevInput + HIGH_PASS_POLE * this.hpState;
       this.hpPrevInput = input[i];
       this.hpState = hp;
       this.lpState = this.lpState + 0.4 * (hp - this.lpState);
@@ -316,18 +480,21 @@ class TunerProcessor extends AudioWorkletProcessor {
     // MPM kept as a debug-only secondary candidate.
     const mpm = findPitchMPM(signal, sampleRate);
 
-    const f0CandidateHz = yin.hz;
-    const confidence = yin.confidence;
+    const stringScores = this.profileScores(signal);
+    const corrected = resolveTargetAwarePitch(yin, sampleRate, this.targets, stringScores);
+    const f0CandidateHz = corrected.hz;
+    const confidence = corrected.confidence;
     const lowConfidence = confidence < 0.6 || transientSuppressed;
 
-    const rawHz = f0CandidateHz;
-    if (rawHz > 0 && !transientSuppressed) {
-      if (onset) this.hzHistory = [rawHz];
+    const rawHz = yin.hz;
+    const correctedHz = f0CandidateHz;
+    if (correctedHz > 0 && !transientSuppressed) {
+      if (onset) this.hzHistory = [correctedHz];
       else {
-        this.hzHistory.push(rawHz);
+        this.hzHistory.push(correctedHz);
         if (this.hzHistory.length > 3) this.hzHistory.shift();
       }
-    } else if (!rawHz) {
+    } else if (!correctedHz) {
       this.hzHistory = [];
     }
     const hz = this.hzHistory.length === 0
@@ -335,10 +502,10 @@ class TunerProcessor extends AudioWorkletProcessor {
       : [...this.hzHistory].sort((a, b) => a - b)[Math.floor(this.hzHistory.length / 2)];
 
     // Stable-tail: last N raw frames within STABLE_TAIL_CENTS of one another.
-    if (rawHz > 0 && !transientSuppressed) {
+    if (rawHz > 0 && correctedHz > 0 && !transientSuppressed) {
       this.recentHz.push(rawHz);
       if (this.recentHz.length > STABLE_TAIL_FRAMES) this.recentHz.shift();
-    } else if (transientSuppressed || rawHz <= 0) {
+    } else if (transientSuppressed || rawHz <= 0 || correctedHz <= 0) {
       this.recentHz = [];
     }
     let stableTail = false;
@@ -349,8 +516,6 @@ class TunerProcessor extends AudioWorkletProcessor {
         return Math.abs(cents) <= STABLE_TAIL_CENTS;
       });
     }
-
-    const stringScores = this.profileScores(signal);
 
     this.port.postMessage({
       hz,
@@ -377,9 +542,13 @@ class TunerProcessor extends AudioWorkletProcessor {
       debug: {
         yinHz: yin.hz,
         yinConfidence: yin.confidence,
-        cmndAtTau: yin.cmndAtTau,
+        cmndAtTau: corrected.cmndAtTau,
+        rawCmndAtTau: yin.cmndAtTau,
         mpmHz: mpm.hz,
         mpmClarity: mpm.clarity,
+        targetStringId: corrected.targetId,
+        targetRelation: corrected.relation?.kind,
+        targetRelationMultiple: corrected.relation?.multiple,
       },
     });
 

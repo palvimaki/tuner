@@ -5,11 +5,19 @@ import { resolveStringTargetHz, type InstrumentString, type TuningPreset } from 
 export type TunerMode = "idle" | "probing" | "latched" | "locked" | "completed";
 export const TUNE_LOCK_MS = 1_000;
 export const LOCK_STABLE_FRAMES = 2;
+export const BASE_LOCK_TOLERANCE_CENTS = 7;
+export const LOW_STRING_LOCK_TOLERANCE_CENTS = 11;
+export const LOW_STRING_LOCK_HZ = 90;
 export const HIGH_CONFIDENCE_CLARITY = 0.9;
 export const HIGH_CONFIDENCE_RMS_DB = -45;
+const DIRECT_FRAME_MIN_CONFIDENCE = 0.7;
+const CORRECTED_FRAME_MIN_CONFIDENCE = 0.55;
+const PROFILE_PENALTY_CENTS_PER_DB = 5;
+const PROFILE_PENALTY_MAX_CENTS = 120;
 
 export interface StringVisualState {
   cents: number | null;
+  instantCents: number | null;
   rawCents: number | null;
   pitchPenaltyCents: number;
   amplitude: number;
@@ -60,6 +68,7 @@ export function createInitialState(preset: TuningPreset): AppState {
         stringDef.id,
         {
           cents: null,
+          instantCents: null,
           rawCents: null,
           pitchPenaltyCents: 0,
           amplitude: 0,
@@ -78,30 +87,13 @@ function sameNoteClass(a: InstrumentString, b: InstrumentString): boolean {
   return a.id.slice(0, -1) === b.id.slice(0, -1);
 }
 
-function foldCentsToNearestOctave(cents: number): number {
-  return ((((cents + 600) % 1200) + 1200) % 1200) - 600;
-}
-
-function octavePenaltyCents(rawCents: number): number {
-  const octavesAway = Math.abs(Math.round(rawCents / 1200));
-  if (octavesAway === 0) return 0;
-  return 45 + (octavesAway - 1) * 25;
-}
-
 function tuningCentsFromHz(frequency: number, referenceHz: number): { rawCents: number; cents: number; penalty: number } {
-  const candidates = [1, 2, 3, 4].map((harmonic) => {
-    const rawCents = centsFromHz(frequency / harmonic, referenceHz);
-    const cents = foldCentsToNearestOctave(rawCents);
-    const harmonicPenalty = harmonic === 1 ? 0 : 30 + (harmonic - 2) * 18;
-    const penalty = octavePenaltyCents(rawCents) + harmonicPenalty;
-    return { rawCents: centsFromHz(frequency, referenceHz), cents, penalty };
-  });
+  const rawCents = centsFromHz(frequency, referenceHz);
+  return { rawCents, cents: rawCents, penalty: 0 };
+}
 
-  return candidates.reduce((best, candidate) =>
-    Math.abs(candidate.cents) + candidate.penalty < Math.abs(best.cents) + best.penalty
-      ? candidate
-      : best,
-  );
+function lockToleranceCents(targetHz: number): number {
+  return targetHz < LOW_STRING_LOCK_HZ ? LOW_STRING_LOCK_TOLERANCE_CENTS : BASE_LOCK_TOLERANCE_CENTS;
 }
 
 export function nearestPresetStringByLogDistance(
@@ -117,7 +109,23 @@ export function nearestPresetStringByLogDistance(
 }
 
 function frameAdmitted(frame: AnalysisFrame): boolean {
-  return frame.rmsDb >= -55 && frame.clarity >= 0.82 && Object.keys(frame.profileScores).length > 0;
+  const correctedTarget =
+    frame.debug?.targetStringId &&
+    frame.debug.targetRelation !== undefined &&
+    frame.debug.targetRelation !== null &&
+    frame.debug.targetRelation !== "direct";
+  const pitchConfidence = typeof frame.confidence === "number" ? frame.confidence : frame.clarity;
+  const minConfidence =
+    typeof frame.confidence === "number"
+      ? correctedTarget
+        ? CORRECTED_FRAME_MIN_CONFIDENCE
+        : DIRECT_FRAME_MIN_CONFIDENCE
+      : 0.82;
+  return (
+    frame.rmsDb >= -55 &&
+    pitchConfidence >= minConfidence &&
+    Object.keys(frame.profileScores).length > 0
+  );
 }
 
 function frameTransient(frame: AnalysisFrame): boolean {
@@ -128,7 +136,7 @@ function frameTransient(frame: AnalysisFrame): boolean {
 function frameHighConfidence(frame: AnalysisFrame): boolean {
   if (frame.lowConfidence === true) return false;
   if (typeof frame.confidence === "number") {
-    return frame.confidence >= 0.7;
+    return frame.confidence >= DIRECT_FRAME_MIN_CONFIDENCE;
   }
   return frame.clarity >= HIGH_CONFIDENCE_CLARITY && frame.rmsDb >= HIGH_CONFIDENCE_RMS_DB;
 }
@@ -149,10 +157,12 @@ function hydrateFrameIntoStrings(state: AppState, frame: AnalysisFrame, preset: 
     if (frame.hz > 0) {
       const tuningCents = tuningCentsFromHz(frame.hz, resolveStringTargetHz(stringDef));
       targetState.rawCents = tuningCents.rawCents;
+      targetState.instantCents = tuningCents.cents;
       targetState.pitchPenaltyCents = tuningCents.penalty;
       targetState.cents = smoothCents(targetState.cents, tuningCents.cents);
     } else {
       targetState.rawCents = null;
+      targetState.instantCents = null;
       targetState.pitchPenaltyCents = 0;
       targetState.cents = smoothCents(targetState.cents, null);
     }
@@ -168,22 +178,50 @@ function candidatePitchDistance(state: StringVisualState): number {
   return Math.abs(cents) + state.pitchPenaltyCents;
 }
 
+function bestProfileScore(state: AppState): number {
+  return Object.values(state.strings).reduce(
+    (best, stringState) => Math.max(best, stringState.scoreDb),
+    -120,
+  );
+}
+
+function profilePenaltyCents(stringState: StringVisualState, frameBestScoreDb: number): number {
+  const deficitDb = Math.max(0, frameBestScoreDb - stringState.scoreDb);
+  return Math.min(PROFILE_PENALTY_MAX_CENTS, deficitDb * PROFILE_PENALTY_CENTS_PER_DB);
+}
+
+function weightedPitchDistance(
+  stringState: StringVisualState,
+  frameBestScoreDb: number,
+): number {
+  const baseDistance = candidatePitchDistance(stringState);
+  if (!Number.isFinite(baseDistance)) return Infinity;
+  return baseDistance + profilePenaltyCents(stringState, frameBestScoreDb);
+}
+
 function likelyFrameString(
   state: AppState,
   preset: TuningPreset,
 ): { stringDef: InstrumentString; scoreDb: number; pitchDistance: number } | null {
+  const frameBestScoreDb = bestProfileScore(state);
   const candidates = preset.strings
     .map((stringDef) => {
       const stringState = state.strings[stringDef.id];
       return {
         stringDef,
         scoreDb: stringState.scoreDb,
-        pitchDistance: candidatePitchDistance(stringState),
+        pitchDistance: weightedPitchDistance(stringState, frameBestScoreDb),
+        basePitchDistance: candidatePitchDistance(stringState),
       };
     })
+    .filter((candidate) => candidate.basePitchDistance <= 120);
+
+  const ranked = candidates
     .filter((candidate) => candidate.pitchDistance <= 120)
     .sort((a, b) => {
-      const distanceDelta = a.pitchDistance - b.pitchDistance;
+      const distanceDelta = sameNoteClass(a.stringDef, b.stringDef)
+        ? a.basePitchDistance - b.basePitchDistance
+        : a.pitchDistance - b.pitchDistance;
       if (!sameNoteClass(a.stringDef, b.stringDef) && Math.abs(distanceDelta) >= 12) {
         return distanceDelta;
       }
@@ -191,26 +229,40 @@ function likelyFrameString(
       return b.scoreDb - a.scoreDb;
     });
 
-  return candidates[0] ?? null;
+  return ranked[0] ?? null;
 }
 
 function bestChallenger(
   state: AppState,
   preset: TuningPreset,
-): { stringDef: InstrumentString; marginDb: number; scoreDb: number; pitchDistance: number } | null {
+): {
+  stringDef: InstrumentString;
+  marginDb: number;
+  scoreDb: number;
+  pitchDistance: number;
+  basePitchDistance: number;
+} | null {
   const active = preset.strings.find((stringDef) => stringDef.id === state.activeStringId);
   if (!active) return null;
+  const activeState = state.strings[active.id];
+  const frameBestScoreDb = bestProfileScore(state);
   const candidates = preset.strings
     .filter((stringDef) => stringDef.id !== active.id)
-    .map((stringDef) => ({
-      stringDef,
-      pitchDistance: candidatePitchDistance(state.strings[stringDef.id]),
-      scoreDb: state.strings[stringDef.id].scoreDb,
-      marginDb: sameNoteClass(stringDef, active) ? 6 : 3,
-    }))
+    .map((stringDef) => {
+      const stringState = state.strings[stringDef.id];
+      return {
+        stringDef,
+        pitchDistance: weightedPitchDistance(stringState, frameBestScoreDb),
+        basePitchDistance: candidatePitchDistance(stringState),
+        scoreDb: stringState.scoreDb,
+        marginDb: sameNoteClass(stringDef, active) ? 6 : 3,
+      };
+    })
     .filter((candidate) => candidate.pitchDistance <= 120)
     .sort((a, b) => {
-      const distanceDelta = a.pitchDistance - b.pitchDistance;
+      const distanceDelta = sameNoteClass(a.stringDef, b.stringDef)
+        ? a.basePitchDistance - b.basePitchDistance
+        : a.pitchDistance - b.pitchDistance;
       if (!sameNoteClass(a.stringDef, b.stringDef) && Math.abs(distanceDelta) >= 12) {
         return distanceDelta;
       }
@@ -301,7 +353,8 @@ export function applyAnalysisFrame(
     const target = state.manualTargetStringId
       ? preset.strings.find((s) => s.id === state.manualTargetStringId)
       : undefined;
-    const nearest = target ?? nearestPresetStringByLogDistance(frame.hz, preset);
+    const detected = target ? null : likelyFrameString(state, preset);
+    const nearest = target ?? detected?.stringDef ?? nearestPresetStringByLogDistance(frame.hz, preset);
     latchString(state, nearest.id, nowMs, 100);
   } else if (frame.hz > 0 && !state.activeStringId && highConfidence) {
     // Acquire by probe only when we have high-confidence evidence.
@@ -331,21 +384,27 @@ export function applyAnalysisFrame(
   if (state.activeStringId) {
     const activeState = state.strings[state.activeStringId];
     const activeDef = preset.strings.find((stringDef) => stringDef.id === state.activeStringId);
-    const targetBias =
-      state.manualTargetStringId && state.manualTargetStringId === state.activeStringId ? 60 : 0;
-
     // Challenger switching only when frame is stable and high confidence.
-    if (highConfidence && !transient) {
+    if (highConfidence && !transient && !state.manualTargetStringId) {
       const challenger = bestChallenger(state, preset);
-      const activePitchDistance = candidatePitchDistance(activeState);
+      const activePitchDistance = weightedPitchDistance(activeState, bestProfileScore(state));
+      const challengerPitchDistance =
+        challenger && activeDef && sameNoteClass(challenger.stringDef, activeDef)
+          ? challenger.basePitchDistance
+          : challenger?.pitchDistance;
+      const activeSwitchDistance =
+        challenger && activeDef && sameNoteClass(challenger.stringDef, activeDef)
+          ? candidatePitchDistance(activeState)
+          : activePitchDistance;
 
       if (
         challenger &&
         activeDef &&
+        challengerPitchDistance !== undefined &&
         nowMs > state.onsetLatchUntilMs &&
-        (challenger.pitchDistance + 24 + targetBias <= activePitchDistance ||
-          (activePitchDistance > 80 + targetBias &&
-            challenger.scoreDb >= activeState.scoreDb + challenger.marginDb + (targetBias > 0 ? 6 : 0)))
+        (challengerPitchDistance + 24 <= activeSwitchDistance ||
+          (activeSwitchDistance > 80 &&
+            challenger.scoreDb >= activeState.scoreDb + challenger.marginDb))
       ) {
         state.switchLeadFrames += 1;
         if (state.switchLeadFrames >= 4) {
@@ -365,9 +424,19 @@ export function applyAnalysisFrame(
 
     const currentId = state.activeStringId;
     const current = state.strings[currentId];
+    const currentDef = preset.strings.find((stringDef) => stringDef.id === currentId);
+    const toleranceCents = currentDef
+      ? lockToleranceCents(resolveStringTargetHz(currentDef))
+      : BASE_LOCK_TOLERANCE_CENTS;
     const displayCentsAbs = Math.abs(current.cents ?? Infinity);
-    const inTune = displayCentsAbs <= 7;
-    const lockEligible = inTune && !transient && highConfidence && stableTail;
+    const instantCentsAbs = Math.abs(current.instantCents ?? Infinity);
+    const inTune = Math.max(displayCentsAbs, instantCentsAbs) <= toleranceCents;
+    const lockEligible =
+      inTune &&
+      weightedPitchDistance(current, bestProfileScore(state)) <= 120 &&
+      !transient &&
+      highConfidence &&
+      stableTail;
 
     if (lockEligible) {
       current.lockStartedMs ??= nowMs;

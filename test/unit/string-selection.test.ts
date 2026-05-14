@@ -107,7 +107,7 @@ describe("string switching hysteresis", () => {
     expect(state.mode).toBe("latched");
   });
 
-  it("acquires high E when the pitch detector reports an upper harmonic", () => {
+  it("acquires high E when the worklet corrected an upper-harmonic detector hit", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);
 
@@ -115,7 +115,8 @@ describe("string switching hysteresis", () => {
       applyAnalysisFrame(
         state,
         {
-          hz: 988.884,
+          hz: 329.628,
+          rawHz: 988.884,
           clarity: 0.93,
           rmsDb: -18,
           shortRmsDb: -18,
@@ -178,6 +179,279 @@ describe("string switching hysteresis", () => {
     expect(state.activeStringId).toBe("E4");
   });
 
+  it("acquires low E when the worklet corrected a third-harmonic detector hit near B", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    const lowEHz = 82.4069;
+    const profileScores = scorePresetProfiles(
+      makePluckSignal(lowEHz, {
+        length: 4_096,
+        harmonics: [0.2, 0.4, 1, 0.25],
+      }),
+      44_100,
+      preset,
+    );
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: lowEHz,
+        rawHz: lowEHz * 3,
+        clarity: 0.96,
+        rmsDb: -18,
+        shortRmsDb: -18,
+        slowRmsDb: -32,
+        onset: true,
+        variance: 1e-3,
+        amplitude: 0.26,
+        sampleWindow: 4096,
+        profileScores,
+        timestampMs: 0,
+      },
+      preset,
+      200,
+    );
+
+    expect(state.activeStringId).toBe("E2");
+  });
+
+  it("moves a false B latch back to low E on low-E harmonic evidence", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    const lowEHz = 82.4069;
+    state.activeStringId = "B3";
+    state.mode = "latched";
+    const profileScores = scorePresetProfiles(
+      makePluckSignal(lowEHz, {
+        length: 4_096,
+        harmonics: [0.2, 0.4, 1, 0.25],
+      }),
+      44_100,
+      preset,
+    );
+
+    for (let frameIndex = 0; frameIndex < 3; frameIndex += 1) {
+      applyAnalysisFrame(
+        state,
+        {
+          hz: lowEHz,
+          rawHz: lowEHz * 3,
+          clarity: 0.96,
+          rmsDb: -18,
+          shortRmsDb: -18,
+          slowRmsDb: -32,
+          onset: false,
+          variance: 1e-3,
+          amplitude: 0.26,
+          sampleWindow: 4096,
+          profileScores,
+          stableTail: true,
+          timestampMs: 0,
+        },
+        preset,
+        200 + frameIndex * 40,
+      );
+      expect(state.activeStringId).toBe("B3");
+      expect(state.strings.B3.lockStartedMs).toBeNull();
+    }
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: lowEHz,
+        rawHz: lowEHz * 3,
+        clarity: 0.96,
+        rmsDb: -18,
+        shortRmsDb: -18,
+        slowRmsDb: -32,
+        onset: false,
+        variance: 1e-3,
+        amplitude: 0.26,
+        sampleWindow: 4096,
+        profileScores,
+        stableTail: true,
+        timestampMs: 0,
+      },
+      preset,
+      320,
+    );
+
+    expect(state.activeStringId).toBe("E2");
+    expect(state.strings.B3.lockedInThisSession).toBe(false);
+  });
+
+  it("does not override a manual B target with corrected low-E evidence", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    const lowEHz = 82.4069;
+    setManualTarget(state, preset, "B3", 0);
+    const profileScores = scorePresetProfiles(
+      makePluckSignal(lowEHz, {
+        length: 4_096,
+        harmonics: [0.2, 0.4, 1, 0.25],
+      }),
+      44_100,
+      preset,
+    );
+
+    for (let frameIndex = 0; frameIndex < 6; frameIndex += 1) {
+      applyAnalysisFrame(
+        state,
+        {
+          hz: lowEHz,
+          rawHz: lowEHz * 3,
+          clarity: 0.96,
+          rmsDb: -18,
+          shortRmsDb: -18,
+          slowRmsDb: -32,
+          onset: false,
+          variance: 1e-3,
+          amplitude: 0.26,
+          sampleWindow: 4096,
+          profileScores,
+          stableTail: true,
+          timestampMs: 0,
+        },
+        preset,
+        240 + frameIndex * 40,
+      );
+    }
+
+    expect(state.manualTargetStringId).toBe("B3");
+    expect(state.activeStringId).toBe("B3");
+    expect(state.strings.B3.lockStartedMs).toBeNull();
+  });
+
+  it("keeps direct A3 in Open D ahead of D2 third-harmonic evidence", () => {
+    const preset = guitarPresets.find((entry) => entry.id === "open-d")!;
+    const state = createInitialState(preset);
+    const a3 = preset.strings.find((stringDef) => stringDef.id === "A3")!;
+    const profileScores = scorePresetProfiles(
+      makePluckSignal(a3.hz, { length: 4_096 }),
+      44_100,
+      preset,
+    );
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: a3.hz,
+        clarity: 0.96,
+        rmsDb: -18,
+        shortRmsDb: -18,
+        slowRmsDb: -32,
+        onset: true,
+        variance: 1e-3,
+        amplitude: 0.26,
+        sampleWindow: 4096,
+        profileScores,
+        timestampMs: 0,
+      },
+      preset,
+      200,
+    );
+
+    expect(state.activeStringId).toBe("A3");
+  });
+
+  it.each([
+    ["drop-d", "D3"],
+    ["dadgad", "D3"],
+    ["open-g", "D3"],
+    ["open-g", "G3"],
+    ["open-d", "D3"],
+  ])("acquires direct %s %s instead of a lower same-note octave", (presetId, stringId) => {
+    const preset = guitarPresets.find((entry) => entry.id === presetId)!;
+    const state = createInitialState(preset);
+    const target = preset.strings.find((stringDef) => stringDef.id === stringId)!;
+    const profileScores = scorePresetProfiles(
+      makePluckSignal(target.hz, { length: 4_096 }),
+      44_100,
+      preset,
+    );
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: target.hz,
+        clarity: 0.96,
+        rmsDb: -18,
+        shortRmsDb: -18,
+        slowRmsDb: -32,
+        onset: true,
+        variance: 1e-3,
+        amplitude: 0.26,
+        sampleWindow: 4096,
+        profileScores,
+        timestampMs: 0,
+      },
+      preset,
+      200,
+    );
+
+    expect(state.activeStringId).toBe(stringId);
+  });
+
+  it("switches a lower same-note latch to the direct string before lock progress", () => {
+    const preset = guitarPresets.find((entry) => entry.id === "drop-d")!;
+    const state = createInitialState(preset);
+    const target = preset.strings.find((stringDef) => stringDef.id === "D3")!;
+    state.activeStringId = "D2";
+    state.mode = "latched";
+    const profileScores = scorePresetProfiles(
+      makePluckSignal(target.hz, { length: 4_096 }),
+      44_100,
+      preset,
+    );
+
+    for (let frameIndex = 0; frameIndex < 3; frameIndex += 1) {
+      applyAnalysisFrame(
+        state,
+        {
+          hz: target.hz,
+          clarity: 0.96,
+          rmsDb: -18,
+          shortRmsDb: -18,
+          slowRmsDb: -32,
+          onset: false,
+          variance: 1e-3,
+          amplitude: 0.26,
+          sampleWindow: 4096,
+          profileScores,
+          stableTail: true,
+          timestampMs: 0,
+        },
+        preset,
+        200 + frameIndex * 40,
+      );
+      expect(state.activeStringId).toBe("D2");
+      expect(state.strings.D2.lockStartedMs).toBeNull();
+    }
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: target.hz,
+        clarity: 0.96,
+        rmsDb: -18,
+        shortRmsDb: -18,
+        slowRmsDb: -32,
+        onset: false,
+        variance: 1e-3,
+        amplitude: 0.26,
+        sampleWindow: 4096,
+        profileScores,
+        stableTail: true,
+        timestampMs: 0,
+      },
+      preset,
+      320,
+    );
+
+    expect(state.activeStringId).toBe("D3");
+    expect(state.strings.D2.lockedInThisSession).toBe(false);
+  });
+
   it("switches from B to high E after four strong high-E frames", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);
@@ -236,7 +510,7 @@ describe("string switching hysteresis", () => {
     expect(state.activeStringId).toBe("E4");
   });
 
-  it("switches from B to high E when the detector reports the lower octave", () => {
+  it("switches from B to high E when the worklet corrected a lower-octave detector hit", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);
     state.activeStringId = "B3";
@@ -246,7 +520,8 @@ describe("string switching hysteresis", () => {
       applyAnalysisFrame(
         state,
         {
-          hz: 164.814,
+          hz: 329.628,
+          rawHz: 164.814,
           clarity: 0.93,
           rmsDb: -18,
           shortRmsDb: -18,
@@ -349,7 +624,7 @@ describe("string switching hysteresis", () => {
     expect(state.strings.E4.lockStartedMs).toBeNull();
   });
 
-  it("holds high E through third-harmonic frames that resemble B", () => {
+  it("holds high E through corrected third-harmonic frames that resemble B", () => {
     const preset = guitarPresets[0];
     const state = createInitialState(preset);
     state.activeStringId = "E4";
@@ -359,7 +634,8 @@ describe("string switching hysteresis", () => {
       applyAnalysisFrame(
         state,
         {
-          hz: 988.884,
+          hz: 329.628,
+          rawHz: 988.884,
           clarity: 0.94,
           rmsDb: -18,
           shortRmsDb: -18,

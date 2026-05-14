@@ -40,6 +40,13 @@ function parabolicTau(d: ArrayLike<number>, tau: number): number {
   return t + (s0 - s2) / (2 * denom);
 }
 
+function cmndAtHz(cmnd: ArrayLike<number>, sampleRate: number, hz: number): number {
+  if (hz <= 0) return 1;
+  const tau = Math.round(sampleRate / hz);
+  if (tau <= 0 || tau >= cmnd.length) return 1;
+  return cmnd[tau] ?? 1;
+}
+
 function localTargetPitch(cmnd: ArrayLike<number>, sampleRate: number, targetHz: number) {
   const centerTau = sampleRate / targetHz;
   const minTau = Math.max(2, Math.floor(centerTau * 2 ** (-TARGET_SEARCH_CENTS / 1200)));
@@ -97,6 +104,16 @@ function rawRelation(rawHz: number, candidateHz: number, targetHz: number) {
   };
 }
 
+function displayHzFromRelation(
+  rawHz: number,
+  candidateHz: number,
+  relation: NonNullable<ReturnType<typeof rawRelation>>,
+): number {
+  if (relation.kind === "harmonic") return rawHz / relation.multiple;
+  if (relation.kind === "subharmonic") return rawHz * relation.multiple;
+  return candidateHz;
+}
+
 export function resolveTargetAwarePitch(input: TargetAwarePitchInput): TargetAwarePitchResult {
   if (input.rawHz <= 0 || input.targets.length === 0) {
     return {
@@ -145,11 +162,19 @@ export function resolveTargetAwarePitch(input: TargetAwarePitchInput): TargetAwa
         relation.cents * 0.5 +
         profileDeficit * 4 +
         candidate.cmndAtTau * 35;
+      const displayHz = displayHzFromRelation(input.rawHz, candidate.hz, relation);
+      if (displayHz <= 0) continue;
+      const displayTargetCents = centsBetween(displayHz, target.hz);
+      if (Math.abs(displayTargetCents) > TARGET_SEARCH_CENTS) continue;
+      const displayCmndAtTau =
+        relation.kind === "direct"
+          ? candidate.cmndAtTau
+          : cmndAtHz(input.cmnd, input.sampleRate, displayHz);
 
       candidates.push({
-        hz: candidate.hz,
-        confidence: candidate.confidence,
-        cmndAtTau: candidate.cmndAtTau,
+        hz: displayHz,
+        confidence: Math.max(0, Math.min(1, 1 - displayCmndAtTau)),
+        cmndAtTau: displayCmndAtTau,
         targetId: target.id,
         relation: relation.kind,
         relationMultiple: relation.multiple,

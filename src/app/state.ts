@@ -177,12 +177,16 @@ function hydrateFramePitchIntoStrings(state: AppState, frame: AnalysisFrame, pre
   }
 }
 
+function resetStringPitch(stringState: StringVisualState): void {
+  stringState.rawCents = null;
+  stringState.instantCents = null;
+  stringState.cents = null;
+  stringState.pitchPenaltyCents = 0;
+}
+
 function clearPitchState(state: AppState): void {
   for (const stringState of Object.values(state.strings)) {
-    stringState.rawCents = null;
-    stringState.instantCents = null;
-    stringState.cents = null;
-    stringState.pitchPenaltyCents = 0;
+    resetStringPitch(stringState);
   }
 }
 
@@ -297,13 +301,47 @@ function resetProbe(state: AppState): void {
   state.probeLeadFrames = 0;
 }
 
-function latchString(state: AppState, stringId: string, nowMs: number, latchMs: number): void {
+function resetLockSession(state: AppState): void {
+  state.activeStringId = null;
+  state.completedAtMs = null;
+  state.mode = "probing";
+  state.switchLeadFrames = 0;
+  resetProbe(state);
+  for (const stringState of Object.values(state.strings)) {
+    stringState.lockedInThisSession = false;
+    stringState.lockStartedMs = null;
+    stringState.lockedAtMs = null;
+    stringState.inToleranceFrames = 0;
+    resetStringPitch(stringState);
+  }
+}
+
+function frameTargetString(frame: AnalysisFrame, preset: TuningPreset): InstrumentString | null {
+  const debugTargetId = frame.debug?.targetStringId;
+  const debugTarget = debugTargetId
+    ? preset.strings.find((stringDef) => stringDef.id === debugTargetId)
+    : undefined;
+  if (debugTarget) return debugTarget;
+  return frame.hz > 0 ? nearestPresetStringByLogDistance(frame.hz, preset) : null;
+}
+
+function latchString(
+  state: AppState,
+  stringId: string,
+  nowMs: number,
+  latchMs: number,
+  clearLatchedPitch = false,
+): void {
   const previous = state.activeStringId;
   state.activeStringId = stringId;
   state.onsetLatchUntilMs = nowMs + latchMs;
   state.switchLeadFrames = 0;
   resetProbe(state);
   state.mode = "latched";
+  if (clearLatchedPitch) {
+    const nextState = state.strings[stringId];
+    if (nextState) resetStringPitch(nextState);
+  }
   if (previous && previous !== stringId) {
     const prevState = state.strings[previous];
     if (prevState) {
@@ -330,7 +368,7 @@ export function setManualTarget(
   const stringDef = preset.strings.find((s) => s.id === stringId);
   if (!stringDef) return;
   state.manualTargetStringId = stringId;
-  latchString(state, stringId, nowMs, 200);
+  latchString(state, stringId, nowMs, 200, true);
 }
 
 export function applyAnalysisFrame(
@@ -346,6 +384,11 @@ export function applyAnalysisFrame(
 
   const admitted = frameAdmitted(frame);
   const transient = frameTransient(frame);
+
+  if (admitted && frame.onset && state.completedAtMs !== null && nowMs - state.completedAtMs >= 700) {
+    resetLockSession(state);
+  }
+
   hydrateFrameLevels(state, frame, preset);
 
   if (!admitted) {
@@ -370,13 +413,22 @@ export function applyAnalysisFrame(
   const highConfidence = frameHighConfidence(frame);
   const stableTail = frameStableTail(frame);
 
-  if (frame.onset && frame.hz > 0 && !state.activeStringId) {
+  const onsetTarget = frame.onset
+    ? state.manualTargetStringId
+      ? preset.strings.find((s) => s.id === state.manualTargetStringId) ?? null
+      : frameTargetString(frame, preset)
+    : null;
+
+  if (frame.onset && frame.hz > 0 && onsetTarget) {
     const target = state.manualTargetStringId
       ? preset.strings.find((s) => s.id === state.manualTargetStringId)
       : undefined;
-    const detected = target ? null : likelyFrameString(state, preset);
-    const nearest = target ?? detected?.stringDef ?? nearestPresetStringByLogDistance(frame.hz, preset);
-    latchString(state, nearest.id, nowMs, 100);
+    const activeLocked =
+      state.activeStringId !== null &&
+      state.strings[state.activeStringId]?.lockedInThisSession === true;
+    if (!state.activeStringId || (activeLocked && onsetTarget.id !== state.activeStringId)) {
+      latchString(state, (target ?? onsetTarget).id, nowMs, 100, true);
+    }
   } else if (frame.hz > 0 && !state.activeStringId && highConfidence) {
     // Acquire by probe only when we have high-confidence evidence.
     if (state.manualTargetStringId) {

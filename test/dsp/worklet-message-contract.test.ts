@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 const SAMPLE_RATE = 44_100;
 const LOW_E_HZ = 82.4069;
+const A2_HZ = 110;
 const B3_HZ = 246.9417;
 const D4_HZ = 293.6648;
 const E4_HZ = 329.6276;
@@ -44,6 +45,17 @@ function makeCmndWithTroughs(troughs: Array<{ hz: number; value: number }>): Flo
     }
   }
   return cmnd;
+}
+
+function concatSignals(signals: readonly Float32Array[]): Float32Array {
+  const length = signals.reduce((sum, signal) => sum + signal.length, 0);
+  const out = new Float32Array(length);
+  let offset = 0;
+  for (const signal of signals) {
+    out.set(signal, offset);
+    offset += signal.length;
+  }
+  return out;
 }
 
 describe("production worklet frame contract", () => {
@@ -226,6 +238,68 @@ describe("production worklet frame contract", () => {
 
     expect(correctedFrames.length).toBeGreaterThan(0);
     expect(stableFrames).toHaveLength(0);
+  });
+
+  it("flushes smoothed pitch history when the target string changes", () => {
+    let ProcessorClass!: new (options: unknown) => {
+      process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean;
+    };
+    const posted: unknown[] = [];
+    const context = {
+      console,
+      sampleRate: SAMPLE_RATE,
+      currentTime: 0,
+      AudioWorkletProcessor: class {
+        port = { postMessage: (message: unknown) => posted.push(message), onmessage: null };
+      },
+      registerProcessor: (_name: string, cls: typeof ProcessorClass) => {
+        ProcessorClass = cls;
+      },
+    };
+    vm.createContext(context);
+    vm.runInContext(readFileSync("public/worklets/tuner-processor.js", "utf8"), context);
+
+    const lowECmnd = makeCmndWithMinimum(LOW_E_HZ);
+    const a2Cmnd = makeCmndWithMinimum(A2_HZ);
+    (context as typeof context & { findPitchYIN: unknown }).findPitchYIN = () => {
+      const hz = context.currentTime < 0.62 ? LOW_E_HZ : A2_HZ;
+      return {
+        hz,
+        confidence: 0.96,
+        cmndAtTau: 0.04,
+        cmnd: hz === LOW_E_HZ ? lowECmnd : a2Cmnd,
+      };
+    };
+
+    const targets = [
+      ["E2", LOW_E_HZ],
+      ["A2", A2_HZ],
+      ["D3", 146.8324],
+      ["G3", 195.9977],
+      ["B3", B3_HZ],
+      ["E4", E4_HZ],
+    ].map(([id, hz]) => ({ id, hz }));
+    const processor = new ProcessorClass({
+      processorOptions: { targets, onsetThresholdDb: 8, onsetDebounceMs: 140 },
+    });
+    const signal = concatSignals([
+      makePluck(LOW_E_HZ, 0.7, [1, 0.45, 0.22, 0.12]),
+      makePluck(A2_HZ, 0.7, [1, 0.45, 0.22, 0.12]),
+    ]);
+    const output = new Float32Array(128);
+
+    for (let offset = 0; offset + 128 <= signal.length; offset += 128) {
+      context.currentTime = offset / SAMPLE_RATE;
+      processor.process([[signal.slice(offset, offset + 128)]], [[output]]);
+    }
+
+    const a2Frames = posted
+      .map((frame) => frame as { hz: number; transientSuppressed?: boolean; debug?: { targetStringId?: string } })
+      .filter((frame) => frame.debug?.targetStringId === "A2" && !frame.transientSuppressed && frame.hz > 0);
+    const firstA2 = a2Frames[0];
+
+    expect(firstA2).toBeDefined();
+    expect(Math.abs((firstA2?.hz ?? 0) - A2_HZ)).toBeLessThan(1.5);
   });
 
   it("keeps a direct B3 pluck from being retargeted to low E", () => {

@@ -108,6 +108,18 @@ export class AudioEngine {
     await this.context?.suspend();
   }
 
+  async stop(): Promise<void> {
+    this.sourceNode?.disconnect();
+    this.sourceNode = null;
+
+    for (const track of this.stream?.getTracks() ?? []) {
+      track.stop();
+    }
+    this.stream = null;
+
+    await this.context?.suspend();
+  }
+
   async resume(): Promise<void> {
     await this.context?.resume();
   }

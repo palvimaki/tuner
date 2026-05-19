@@ -103,6 +103,8 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
       await engine.start(targetsForPreset(preset));
       if (document.hidden || generation !== lifecycleGeneration) {
         await engine.stop();
+        audioWasLive = false;
+        glassVeil.hidden = false;
         return;
       }
       markMicGranted();

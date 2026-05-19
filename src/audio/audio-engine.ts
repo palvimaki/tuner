@@ -35,17 +35,19 @@ export class AudioEngine {
   }
 
   async start(targets: AnalysisTarget[]): Promise<void> {
-    if (!this.context) {
-      this.context = new AudioContext({ latencyHint: "interactive" });
-    }
-    if (this.context.state === "suspended") {
-      await this.context.resume();
+    const context = this.context ?? new AudioContext({ latencyHint: "interactive" });
+    this.context = context;
+    if (context.state === "suspended") {
+      await context.resume();
     }
     if (!this.processor) {
-      await this.context.audioWorklet.addModule(
+      await context.audioWorklet.addModule(
         `/worklets/tuner-processor.js?v=${this.version.appVersion}`,
       );
-      this.processor = new AudioWorkletNode(this.context, "tuner-processor", {
+      // A lifecycle stop() during addModule tears the context down; abort cleanly
+      // so the next user tap rebuilds from scratch instead of half-initializing.
+      if (this.context !== context) return;
+      const processor = new AudioWorkletNode(context, "tuner-processor", {
         numberOfInputs: 1,
         numberOfOutputs: 1,
         outputChannelCount: [1],
@@ -55,13 +57,14 @@ export class AudioEngine {
           targets,
         },
       });
-      this.processor.port.onmessage = (event: MessageEvent<AnalysisFrame>) => this.emit(event.data);
-      this.silentGain = this.context.createGain();
+      processor.port.onmessage = (event: MessageEvent<AnalysisFrame>) => this.emit(event.data);
+      this.silentGain = context.createGain();
       this.silentGain.gain.value = 0;
-      this.processor.connect(this.silentGain).connect(this.context.destination);
+      processor.connect(this.silentGain).connect(context.destination);
+      this.processor = processor;
     }
     if (!this.stream) {
-      this.stream = await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
           echoCancellation: false,
@@ -69,7 +72,13 @@ export class AudioEngine {
           autoGainControl: false,
         },
       });
-      this.sourceNode = this.context.createMediaStreamSource(this.stream);
+      // getUserMedia can resolve after a lifecycle stop() nulled the context.
+      if (this.context !== context || !this.processor) {
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
+      this.stream = stream;
+      this.sourceNode = context.createMediaStreamSource(stream);
       this.sourceNode.connect(this.processor);
     }
     this.setTargets(targets);
@@ -117,7 +126,14 @@ export class AudioEngine {
     }
     this.stream = null;
 
-    await this.context?.suspend();
+    this.processor?.disconnect();
+    this.processor = null;
+    this.silentGain?.disconnect();
+    this.silentGain = null;
+
+    const context = this.context;
+    this.context = null;
+    await context?.close();
   }
 
   async resume(): Promise<void> {

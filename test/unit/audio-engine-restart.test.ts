@@ -48,6 +48,79 @@ afterEach(() => {
 });
 
 describe("AudioEngine restart after a lifecycle stop()", () => {
+  it("aborts start() when AudioContext.resume() resolves without running", async () => {
+    const contexts: FakeAudioContext[] = [];
+    class RefusedResumeContext extends FakeAudioContext {
+      constructor() {
+        super();
+        contexts.push(this);
+      }
+      async resume(): Promise<void> {
+        this.state = "suspended";
+      }
+    }
+    vi.stubGlobal("AudioContext", RefusedResumeContext);
+    vi.stubGlobal("AudioWorkletNode", FakeWorkletNode);
+    vi.stubGlobal("navigator", {
+      mediaDevices: { getUserMedia: vi.fn(async () => fakeStream()) },
+    });
+
+    const engine = new AudioEngine(instrument, { appVersion: "0.1.19", buildTime: "" });
+
+    await engine.start([]);
+
+    expect(engine.isRunning()).toBe(false);
+    expect(contexts[0].audioWorklet.addModule).not.toHaveBeenCalled();
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it("aborts a start() interrupted while AudioContext.resume() is pending", async () => {
+    const contexts: FakeAudioContext[] = [];
+    let releaseResume: () => void = () => {};
+    let holdNextResume = true;
+    class PendingResumeContext extends FakeAudioContext {
+      constructor() {
+        super();
+        contexts.push(this);
+      }
+      async resume(): Promise<void> {
+        if (holdNextResume) {
+          holdNextResume = false;
+          await new Promise<void>((resolve) => {
+            releaseResume = resolve;
+          });
+        }
+        if (!this.closed) {
+          this.state = "running";
+        }
+      }
+    }
+    vi.stubGlobal("AudioContext", PendingResumeContext);
+    vi.stubGlobal("AudioWorkletNode", FakeWorkletNode);
+    vi.stubGlobal("navigator", {
+      mediaDevices: { getUserMedia: vi.fn(async () => fakeStream()) },
+    });
+
+    const engine = new AudioEngine(instrument, { appVersion: "0.1.19", buildTime: "" });
+
+    const firstStart = engine.start([]);
+    await Promise.resolve();
+    await engine.stop();
+    releaseResume();
+    await expect(firstStart).resolves.toBeUndefined();
+
+    expect(contexts[0].closed).toBe(true);
+    expect(contexts[0].audioWorklet.addModule).not.toHaveBeenCalled();
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+
+    await engine.start([]);
+
+    expect(contexts.length).toBe(2);
+    expect(contexts[1].closed).toBe(false);
+    expect(contexts[1].state).toBe("running");
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+  });
+
   it("aborts a start() interrupted by stop() and fully restarts on the next start()", async () => {
     const contexts: FakeAudioContext[] = [];
     class TrackedContext extends FakeAudioContext {

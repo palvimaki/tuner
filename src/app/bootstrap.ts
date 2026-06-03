@@ -40,6 +40,13 @@ function targetsForPreset(preset: ReturnType<typeof getPresetById>): AnalysisTar
   return preset.strings.map((stringDef) => ({ id: stringDef.id, hz: resolveStringTargetHz(stringDef) }));
 }
 
+type StartSource = "auto" | "user";
+
+interface StartInFlight {
+  promise: Promise<void>;
+  source: StartSource;
+}
+
 export async function bootstrapApp(root: HTMLElement): Promise<void> {
   const version = await loadVersionInfo().catch(() => ({
     appVersion: "0.1.0",
@@ -88,7 +95,8 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
   let audioWasLive = false;
   let resumeAfterVisibilityRestore = false;
   let lifecycleGeneration = 0;
-  let startInFlight: Promise<void> | null = null;
+  let activeStartToken = 0;
+  let startInFlight: StartInFlight | null = null;
   engine.onFrame((frame) => {
     const nowMs = performance.now();
     applyAnalysisFrame(state, frame, preset, nowMs);
@@ -97,52 +105,74 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     renderer.setState(renderState);
   });
 
-  const runStartAudio = async (): Promise<void> => {
+  const runStartAudio = async (token: number): Promise<void> => {
     const generation = lifecycleGeneration;
     try {
       await engine.start(targetsForPreset(preset));
-      if (document.hidden || generation !== lifecycleGeneration) {
-        await engine.stop();
-        audioWasLive = false;
-        glassVeil.hidden = false;
+      if (document.hidden || generation !== lifecycleGeneration || token !== activeStartToken) {
+        if (token === activeStartToken) {
+          await engine.stop();
+          audioWasLive = false;
+          glassVeil.hidden = false;
+        }
+        return;
+      }
+      if (!engine.isRunning()) {
+        if (token === activeStartToken) {
+          audioWasLive = false;
+          glassVeil.hidden = false;
+          await engine.stop();
+        }
         return;
       }
       markMicGranted();
-      const ok = await engine.waitForLiveInput({
-        timeoutMs: 1500,
-        minLiveFrames: 12,
-        minVariance: 1e-7,
-      });
-      if (ok) {
-        audioWasLive = true;
-        glassVeil.hidden = true;
-        await requestWakeLock();
-      } else {
+      audioWasLive = true;
+      glassVeil.hidden = true;
+      await requestWakeLock();
+    } catch {
+      if (token === activeStartToken) {
         audioWasLive = false;
         glassVeil.hidden = false;
+        await engine.stop().catch(() => undefined);
       }
-    } catch {
-      audioWasLive = false;
-      glassVeil.hidden = false;
       // Keep the microphone prompt visible so the user can retry in-place.
     }
   };
 
-  const startAudio = (): Promise<void> => {
-    if (!startInFlight) {
-      startInFlight = runStartAudio().finally(() => {
-        startInFlight = null;
-      });
+  const startAudio = (source: StartSource): Promise<void> => {
+    if (startInFlight) {
+      if (source !== "user" || startInFlight.source !== "auto") {
+        return startInFlight.promise;
+      }
+      lifecycleGeneration += 1;
+      audioWasLive = false;
+      glassVeil.hidden = false;
+      void engine.stop();
     }
-    return startInFlight;
+    const token = (activeStartToken += 1);
+    const entry: StartInFlight = {
+      source,
+      promise: Promise.resolve(),
+    };
+    entry.promise = runStartAudio(token).finally(() => {
+      if (startInFlight === entry) {
+        startInFlight = null;
+      }
+    });
+    startInFlight = entry;
+    return entry.promise;
   };
 
-  glassVeil.querySelector("button")?.addEventListener("click", () => {
-    void startAudio();
+  const micButton = glassVeil.querySelector("button");
+  micButton?.addEventListener("pointerup", () => {
+    void startAudio("user");
+  });
+  micButton?.addEventListener("click", () => {
+    void startAudio("user");
   });
 
   if (hasKnownMicGrant()) {
-    void startAudio();
+    void startAudio("auto");
   }
 
   document.addEventListener("visibilitychange", () => {
@@ -157,7 +187,7 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     }
     if (resumeAfterVisibilityRestore) {
       resumeAfterVisibilityRestore = false;
-      void startAudio();
+      void startAudio("auto");
     }
   });
 

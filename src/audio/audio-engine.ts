@@ -2,12 +2,6 @@ import type { Instrument } from "../domain/instrument";
 import type { AnalysisFrame, AnalysisTarget } from "./frame-protocol";
 import type { VersionInfo } from "../pwa/version";
 
-interface LiveInputWaitOptions {
-  timeoutMs: number;
-  minLiveFrames: number;
-  minVariance: number;
-}
-
 type FrameListener = (frame: AnalysisFrame) => void;
 
 export class AudioEngine {
@@ -39,6 +33,11 @@ export class AudioEngine {
     this.context = context;
     if (context.state === "suspended") {
       await context.resume();
+      // iOS standalone can suspend/tear down the page while resume() is
+      // pending. Do not continue bootstrapping a closed or replaced context.
+      const stateAfterResume = (context as { readonly state: AudioContextState }).state;
+      if (this.context !== context || stateAfterResume === "closed") return;
+      if (stateAfterResume !== "running") return;
     }
     if (!this.processor) {
       await context.audioWorklet.addModule(
@@ -93,24 +92,8 @@ export class AudioEngine {
     });
   }
 
-  async waitForLiveInput(options: LiveInputWaitOptions): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
-      let liveFrames = 0;
-      const off = this.onFrame((frame) => {
-        if (frame.variance >= options.minVariance) {
-          liveFrames += 1;
-        }
-        if (liveFrames >= options.minLiveFrames) {
-          clearTimeout(timer);
-          off();
-          resolve(true);
-        }
-      });
-      const timer = window.setTimeout(() => {
-        off();
-        resolve(false);
-      }, options.timeoutMs);
-    });
+  isRunning(): boolean {
+    return this.context?.state === "running";
   }
 
   async suspend(): Promise<void> {

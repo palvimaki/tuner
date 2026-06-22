@@ -34,7 +34,7 @@ if $DRYRUN; then
   exit 0
 fi
 
-rsync -az --delete --delay-updates "${RSYNC_EXCLUDES[@]}" dist/ "${DEPLOY_HOST}:${DEPLOY_PATH}"
+rsync -az --delete --delay-updates --delete-delay "${RSYNC_EXCLUDES[@]}" dist/ "${DEPLOY_HOST}:${DEPLOY_PATH}"
 
 ssh "$VERIFY_HOST" "DEPLOY_URL='$DEPLOY_URL' bash -s" <<'EOF'
 set -euo pipefail

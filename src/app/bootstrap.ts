@@ -82,7 +82,10 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
         text = active.inTune ? `${active.label}, in tune` : active.label;
       }
     }
-    if (text && text !== lastAnnouncement) {
+    // Update on every change — including the empty state when no string is
+    // active — so clearing the active string resets the announcement and a
+    // later re-pluck of the same string re-announces instead of being skipped.
+    if (text !== lastAnnouncement) {
       lastAnnouncement = text;
       ariaLive.textContent = text;
     }
@@ -114,6 +117,7 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
       const renderState = buildRenderState(state, preset, !hasOpenedControls(), performance.now());
       controls.setStringLabels(renderState.strings);
       renderer.setState(renderState);
+      announce(renderState);
       if (engine) engine.setTargets(targetsForPreset(preset));
     },
   });

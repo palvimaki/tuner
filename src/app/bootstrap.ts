@@ -16,7 +16,8 @@ import { createControls } from "../ui/controls";
 import { Renderer } from "../ui/renderer";
 import { buildRenderState } from "../ui/scene";
 import { requestWakeLock, releaseWakeLock } from "../pwa/wake-lock";
-import { loadVersionInfo, registerServiceWorker } from "../pwa/version";
+import { enableServiceWorkerAutoReload, loadVersionInfo, registerServiceWorker } from "../pwa/version";
+import type { RenderState } from "../ui/scene";
 
 function buildGlassVeil(): HTMLDivElement {
   const veil = document.createElement("div");
@@ -52,11 +53,43 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     appVersion: "0.1.0",
     buildTime: new Date().toISOString(),
   }));
-  await registerServiceWorker(version.appVersion);
+  // Register off the critical first-paint path, and reload long-lived tabs when
+  // a freshly-activated service worker takes over (see pwa/version.ts).
+  enableServiceWorkerAutoReload();
+  void registerServiceWorker(version.appVersion);
 
   const instrument = instrumentRegistry.guitar;
   let preset = getPresetById(instrument.presets, instrument.defaultPresetId);
   let state = createInitialState(preset);
+
+  // The tuner readout is drawn on <canvas>, which screen readers cannot see.
+  // Mirror the active-string / in-tune / completion state into a polite live
+  // region so the same information is announced audibly. Only re-announces when
+  // the meaningful state changes, to avoid flooding the reader every frame.
+  const ariaLive = document.createElement("div");
+  ariaLive.className = "sr-only";
+  ariaLive.setAttribute("role", "status");
+  ariaLive.setAttribute("aria-live", "polite");
+  ariaLive.setAttribute("aria-atomic", "true");
+  let lastAnnouncement = "";
+  const announce = (renderState: RenderState): void => {
+    let text = "";
+    if (renderState.mode === "completed") {
+      text = "All strings tuned.";
+    } else {
+      const active = renderState.strings.find((stringState) => stringState.active);
+      if (active) {
+        text = active.inTune ? `${active.label}, in tune` : active.label;
+      }
+    }
+    // Update on every change — including the empty state when no string is
+    // active — so clearing the active string resets the announcement and a
+    // later re-pluck of the same string re-announces instead of being skipped.
+    if (text !== lastAnnouncement) {
+      lastAnnouncement = text;
+      ariaLive.textContent = text;
+    }
+  };
 
   const shell = document.createElement("div");
   shell.className = "app-shell";
@@ -84,11 +117,12 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
       const renderState = buildRenderState(state, preset, !hasOpenedControls(), performance.now());
       controls.setStringLabels(renderState.strings);
       renderer.setState(renderState);
+      announce(renderState);
       if (engine) engine.setTargets(targetsForPreset(preset));
     },
   });
   const glassVeil = buildGlassVeil();
-  shell.append(canvas, controls.root, glassVeil);
+  shell.append(canvas, controls.root, glassVeil, ariaLive);
   root.replaceChildren(shell);
 
   const engine = new AudioEngine(instrument, version);
@@ -103,6 +137,7 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     const renderState = buildRenderState(state, preset, !hasOpenedControls(), nowMs);
     controls.setStringLabels(renderState.strings);
     renderer.setState(renderState);
+    announce(renderState);
   });
 
   const runStartAudio = async (token: number): Promise<void> => {
@@ -213,4 +248,5 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
   );
   controls.setStringLabels(initialRenderState.strings);
   renderer.setState(initialRenderState);
+  announce(initialRenderState);
 }

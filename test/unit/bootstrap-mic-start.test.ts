@@ -137,6 +137,7 @@ function installModuleMocks(harness: Harness): void {
   vi.doMock("../../src/pwa/version", () => ({
     loadVersionInfo: vi.fn(async () => ({ appVersion: "0.1.19", buildTime: "" })),
     registerServiceWorker: vi.fn(async () => undefined),
+    enableServiceWorkerAutoReload: vi.fn(() => undefined),
   }));
   vi.doMock("../../src/pwa/wake-lock", () => ({
     requestWakeLock: vi.fn(async () => undefined),

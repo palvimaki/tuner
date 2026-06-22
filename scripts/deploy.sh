@@ -52,7 +52,11 @@ if [[ "${1:-}" == "--dry-run" ]]; then
   exit 0
 fi
 
-rsync -az --delete "${RSYNC_EXCLUDES[@]}" dist/ "${DEPLOY_HOST}:${DEPLOY_PATH}"
+# --delay-updates: hold every updated file in a temp name until the whole
+# transfer completes, then rename them into place together. Prevents the
+# half-mixed state where index.html (referencing main-NEW.js) lands before the
+# new JS asset — an interrupted rsync leaves the previous tree intact.
+rsync -az --delete --delay-updates "${RSYNC_EXCLUDES[@]}" dist/ "${DEPLOY_HOST}:${DEPLOY_PATH}"
 curl -fsS "${DEPLOY_URL}/" >/dev/null
 
 hashed_js_path="$(

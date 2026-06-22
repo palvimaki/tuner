@@ -2,6 +2,20 @@ import type { Instrument } from "../domain/instrument";
 import type { AnalysisFrame, AnalysisTarget } from "./frame-protocol";
 import type { VersionInfo } from "../pwa/version";
 
+const DEFAULT_YIN_MIN_HZ = 55;
+const DEFAULT_YIN_MAX_HZ = 1400;
+
+// Convert the instrument's configured frequency range into YIN search bounds.
+// Lower the floor only when the instrument needs it (e.g. bass E1 ≈ 41 Hz);
+// instruments whose low end is at/above the default keep the tested 55 Hz floor
+// so their detection behaviour is unchanged. The upper bound stays wide —
+// target-aware correction narrows the real search.
+function rangeToBounds(rangeHz?: [number, number]): { minHz: number; maxHz: number } {
+  if (!rangeHz) return { minHz: DEFAULT_YIN_MIN_HZ, maxHz: DEFAULT_YIN_MAX_HZ };
+  const minHz = rangeHz[0] < DEFAULT_YIN_MIN_HZ ? Math.max(20, rangeHz[0] * 0.8) : DEFAULT_YIN_MIN_HZ;
+  return { minHz, maxHz: DEFAULT_YIN_MAX_HZ };
+}
+
 type FrameListener = (frame: AnalysisFrame) => void;
 
 export class AudioEngine {
@@ -54,6 +68,7 @@ export class AudioEngine {
           onsetThresholdDb: 8,
           onsetDebounceMs: 140,
           targets,
+          ...rangeToBounds(this.instrument.analysis?.rangeHz),
         },
       });
       processor.port.onmessage = (event: MessageEvent<AnalysisFrame>) => this.emit(event.data);
@@ -89,6 +104,7 @@ export class AudioEngine {
       targets,
       onsetThresholdDb: 8,
       onsetDebounceMs: 140,
+      ...rangeToBounds(this.instrument.analysis?.rangeHz),
     });
   }
 

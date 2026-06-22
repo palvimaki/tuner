@@ -2,10 +2,18 @@ import type { Instrument } from "../domain/instrument";
 import type { AnalysisFrame, AnalysisTarget } from "./frame-protocol";
 import type { VersionInfo } from "../pwa/version";
 
-interface LiveInputWaitOptions {
-  timeoutMs: number;
-  minLiveFrames: number;
-  minVariance: number;
+const DEFAULT_YIN_MIN_HZ = 55;
+const DEFAULT_YIN_MAX_HZ = 1400;
+
+// Convert the instrument's configured frequency range into YIN search bounds.
+// Lower the floor only when the instrument needs it (e.g. bass E1 ≈ 41 Hz);
+// instruments whose low end is at/above the default keep the tested 55 Hz floor
+// so their detection behaviour is unchanged. The upper bound stays wide —
+// target-aware correction narrows the real search.
+function rangeToBounds(rangeHz?: [number, number]): { minHz: number; maxHz: number } {
+  if (!rangeHz) return { minHz: DEFAULT_YIN_MIN_HZ, maxHz: DEFAULT_YIN_MAX_HZ };
+  const minHz = rangeHz[0] < DEFAULT_YIN_MIN_HZ ? Math.max(20, rangeHz[0] * 0.8) : DEFAULT_YIN_MIN_HZ;
+  return { minHz, maxHz: DEFAULT_YIN_MAX_HZ };
 }
 
 type FrameListener = (frame: AnalysisFrame) => void;
@@ -35,17 +43,24 @@ export class AudioEngine {
   }
 
   async start(targets: AnalysisTarget[]): Promise<void> {
-    if (!this.context) {
-      this.context = new AudioContext({ latencyHint: "interactive" });
-    }
-    if (this.context.state === "suspended") {
-      await this.context.resume();
+    const context = this.context ?? new AudioContext({ latencyHint: "interactive" });
+    this.context = context;
+    if (context.state === "suspended") {
+      await context.resume();
+      // iOS standalone can suspend/tear down the page while resume() is
+      // pending. Do not continue bootstrapping a closed or replaced context.
+      const stateAfterResume = (context as { readonly state: AudioContextState }).state;
+      if (this.context !== context || stateAfterResume === "closed") return;
+      if (stateAfterResume !== "running") return;
     }
     if (!this.processor) {
-      await this.context.audioWorklet.addModule(
+      await context.audioWorklet.addModule(
         `/worklets/tuner-processor.js?v=${this.version.appVersion}`,
       );
-      this.processor = new AudioWorkletNode(this.context, "tuner-processor", {
+      // A lifecycle stop() during addModule tears the context down; abort cleanly
+      // so the next user tap rebuilds from scratch instead of half-initializing.
+      if (this.context !== context) return;
+      const processor = new AudioWorkletNode(context, "tuner-processor", {
         numberOfInputs: 1,
         numberOfOutputs: 1,
         outputChannelCount: [1],
@@ -53,15 +68,17 @@ export class AudioEngine {
           onsetThresholdDb: 8,
           onsetDebounceMs: 140,
           targets,
+          ...rangeToBounds(this.instrument.analysis?.rangeHz),
         },
       });
-      this.processor.port.onmessage = (event: MessageEvent<AnalysisFrame>) => this.emit(event.data);
-      this.silentGain = this.context.createGain();
+      processor.port.onmessage = (event: MessageEvent<AnalysisFrame>) => this.emit(event.data);
+      this.silentGain = context.createGain();
       this.silentGain.gain.value = 0;
-      this.processor.connect(this.silentGain).connect(this.context.destination);
+      processor.connect(this.silentGain).connect(context.destination);
+      this.processor = processor;
     }
     if (!this.stream) {
-      this.stream = await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
           echoCancellation: false,
@@ -69,7 +86,13 @@ export class AudioEngine {
           autoGainControl: false,
         },
       });
-      this.sourceNode = this.context.createMediaStreamSource(this.stream);
+      // getUserMedia can resolve after a lifecycle stop() nulled the context.
+      if (this.context !== context || !this.processor) {
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
+      this.stream = stream;
+      this.sourceNode = context.createMediaStreamSource(stream);
       this.sourceNode.connect(this.processor);
     }
     this.setTargets(targets);
@@ -81,31 +104,35 @@ export class AudioEngine {
       targets,
       onsetThresholdDb: 8,
       onsetDebounceMs: 140,
+      ...rangeToBounds(this.instrument.analysis?.rangeHz),
     });
   }
 
-  async waitForLiveInput(options: LiveInputWaitOptions): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
-      let liveFrames = 0;
-      const off = this.onFrame((frame) => {
-        if (frame.variance >= options.minVariance) {
-          liveFrames += 1;
-        }
-        if (liveFrames >= options.minLiveFrames) {
-          clearTimeout(timer);
-          off();
-          resolve(true);
-        }
-      });
-      const timer = window.setTimeout(() => {
-        off();
-        resolve(false);
-      }, options.timeoutMs);
-    });
+  isRunning(): boolean {
+    return this.context?.state === "running";
   }
 
   async suspend(): Promise<void> {
     await this.context?.suspend();
+  }
+
+  async stop(): Promise<void> {
+    this.sourceNode?.disconnect();
+    this.sourceNode = null;
+
+    for (const track of this.stream?.getTracks() ?? []) {
+      track.stop();
+    }
+    this.stream = null;
+
+    this.processor?.disconnect();
+    this.processor = null;
+    this.silentGain?.disconnect();
+    this.silentGain = null;
+
+    const context = this.context;
+    this.context = null;
+    await context?.close();
   }
 
   async resume(): Promise<void> {

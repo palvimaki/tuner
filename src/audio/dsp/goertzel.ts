@@ -15,5 +15,8 @@ export function goertzelMagnitude(
     q1 = q0;
   }
 
-  return Math.sqrt(q1 * q1 + q2 * q2 - coeff * q1 * q2);
+  // Clamp the discriminant to ≥0: near resonance (low target Hz, coeff → 2)
+  // floating-point error can push it slightly negative, which would yield NaN
+  // and poison downstream band-magnitude scoring. Matches the worklet impl.
+  return Math.sqrt(Math.max(0, q1 * q1 + q2 * q2 - coeff * q1 * q2));
 }

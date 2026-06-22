@@ -89,9 +89,11 @@ function parabolicTau(d, tau) {
   return tau + (s0 - s2) / (2 * denom);
 }
 
-function findPitchYIN(input, sampleRate) {
-  const maxTau = Math.min(input.length >> 1, Math.ceil(sampleRate / YIN_MIN_HZ) + 2);
-  const minTau = Math.max(2, Math.floor(sampleRate / YIN_MAX_HZ));
+function findPitchYIN(input, sampleRate, minHz, maxHz) {
+  const safeMinHz = minHz > 0 ? minHz : YIN_MIN_HZ;
+  const safeMaxHz = maxHz > 0 ? maxHz : YIN_MAX_HZ;
+  const maxTau = Math.min(input.length >> 1, Math.ceil(sampleRate / safeMinHz) + 2);
+  const minTau = Math.max(2, Math.floor(sampleRate / safeMaxHz));
   if (maxTau <= minTau + 2) return { hz: 0, confidence: 0, cmndAtTau: 1 };
 
   const diff = yinDifference(input, maxTau);
@@ -327,11 +329,13 @@ function findPitchMPM(input, sampleRate) {
 class TunerProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
-    const { targets = [], onsetThresholdDb = 8, onsetDebounceMs = 140 } =
+    const { targets = [], onsetThresholdDb = 8, onsetDebounceMs = 140, minHz = YIN_MIN_HZ, maxHz = YIN_MAX_HZ } =
       options.processorOptions || {};
     this.targets = targets;
     this.onsetThresholdDb = onsetThresholdDb;
     this.onsetDebounceMs = onsetDebounceMs;
+    this.minHz = minHz;
+    this.maxHz = maxHz;
     this.buffer = new Float32Array(4096);
     this.writeIndex = 0;
     this.totalSamples = 0;
@@ -348,6 +352,8 @@ class TunerProcessor extends AudioWorkletProcessor {
         this.targets = event.data.targets ?? this.targets;
         this.onsetThresholdDb = event.data.onsetThresholdDb ?? this.onsetThresholdDb;
         this.onsetDebounceMs = event.data.onsetDebounceMs ?? this.onsetDebounceMs;
+        this.minHz = event.data.minHz ?? this.minHz;
+        this.maxHz = event.data.maxHz ?? this.maxHz;
       }
     };
   }
@@ -467,8 +473,8 @@ class TunerProcessor extends AudioWorkletProcessor {
 
     // YIN on both windows; pick best by confidence with a small bias toward
     // the larger window (lower error on low strings).
-    const yinSmall = findPitchYIN(small, sampleRate);
-    const yinLarge = findPitchYIN(large, sampleRate);
+    const yinSmall = findPitchYIN(small, sampleRate, this.minHz, this.maxHz);
+    const yinLarge = findPitchYIN(large, sampleRate, this.minHz, this.maxHz);
     const preferLarge =
       yinSmall.hz < 110 ||
       yinSmall.confidence < 0.7 ||

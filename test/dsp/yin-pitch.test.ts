@@ -18,6 +18,20 @@ describe("YIN pitch detection", () => {
     expect(result.confidence).toBeGreaterThan(0.7);
   });
 
+  it("resolves bass low E (E1 ≈ 41 Hz) only when the YIN floor is lowered", () => {
+    const target = 41.203;
+    const signal = makePluckSignal(target, { length: 4096, harmonics: [1, 0.5, 0.3] });
+    // With the default 55 Hz floor, E1's period (tau ≈ 1070) is beyond YIN's
+    // maxTau (≈ 804), so the estimate cannot lock the true fundamental.
+    const defaultFloor = findPitchYin(signal, SR);
+    const defaultCents = defaultFloor.hz > 0 ? Math.abs(centsFrom(defaultFloor.hz, target)) : Infinity;
+    expect(defaultCents).toBeGreaterThan(200);
+    // Lowering the floor into the bass range lets YIN reach E1.
+    const bassFloor = findPitchYin(signal, SR, { minHz: 30 });
+    expect(Math.abs(centsFrom(bassFloor.hz, target))).toBeLessThan(10);
+    expect(bassFloor.confidence).toBeGreaterThan(0.6);
+  });
+
   it("locks high E (E4) without slipping to B3 on a harmonic stack", () => {
     const target = 329.628;
     const signal = makePluckSignal(target, {

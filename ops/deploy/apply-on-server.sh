@@ -98,7 +98,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
         add_header Cache-Control "no-cache, max-age=0, must-revalidate" always;
     }
 
@@ -108,7 +108,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
         add_header Cache-Control "no-cache, max-age=0, must-revalidate" always;
         return 404;
     }
@@ -120,7 +120,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
         add_header Cache-Control "no-cache, max-age=0, must-revalidate" always;
     }
 
@@ -131,7 +131,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
         add_header Cache-Control "no-cache, max-age=0, must-revalidate" always;
     }
 
@@ -142,7 +142,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
         add_header Cache-Control "no-cache, max-age=0, must-revalidate" always;
     }
 
@@ -153,7 +153,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
         add_header Cache-Control "no-cache, max-age=0, must-revalidate" always;
     }
 
@@ -164,7 +164,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
         add_header Cache-Control "no-cache, max-age=0, must-revalidate" always;
         add_header Service-Worker-Allowed "/" always;
     }
@@ -176,7 +176,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
         add_header Cache-Control "public, max-age=31536000, immutable" always;
     }
 
@@ -187,7 +187,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
         add_header Cache-Control "public, max-age=31536000, immutable" always;
     }
 
@@ -198,7 +198,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
         add_header Cache-Control "public, max-age=31536000, immutable" always;
     }
 
@@ -209,7 +209,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
         add_header Cache-Control "no-cache, max-age=0, must-revalidate" always;
     }
 
@@ -220,7 +220,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
         add_header Cache-Control "public, max-age=3600" always;
     }
 
@@ -231,7 +231,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
     }
 
     listen 443 ssl; # managed by Certbot

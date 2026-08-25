@@ -48,6 +48,28 @@ afterEach(() => {
 });
 
 describe("AudioEngine restart after a lifecycle stop()", () => {
+  it("classifies unavailable browser audio capability as unsupported", async () => {
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+    vi.stubGlobal("AudioWorkletNode", FakeWorkletNode);
+    vi.stubGlobal("navigator", { mediaDevices: {} });
+
+    const engine = new AudioEngine(instrument, { appVersion: "0.1.20", buildTime: "" });
+
+    await expect(engine.start([])).rejects.toMatchObject({ name: "NotSupportedError" });
+  });
+
+  it("classifies a missing audio worklet node as unsupported", async () => {
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+    vi.stubGlobal("AudioWorkletNode", undefined);
+    vi.stubGlobal("navigator", {
+      mediaDevices: { getUserMedia: vi.fn(async () => fakeStream()) },
+    });
+
+    const engine = new AudioEngine(instrument, { appVersion: "0.1.20", buildTime: "" });
+
+    await expect(engine.start([])).rejects.toMatchObject({ name: "NotSupportedError" });
+  });
+
   it("aborts start() when AudioContext.resume() resolves without running", async () => {
     const contexts: FakeAudioContext[] = [];
     class RefusedResumeContext extends FakeAudioContext {

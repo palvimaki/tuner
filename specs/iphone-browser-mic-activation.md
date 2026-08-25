@@ -11,9 +11,14 @@ Give a user clear recovery steps when microphone start fails.
 - The user can activate the retry control after a failure.
 - An unsupported media request shows a clear browser support message.
 - A busy microphone request shows a clear retry message.
+- A user request immediately shows microphone-start progress.
+- A user request that stays pending for 20 seconds stops the audio engine.
+- A timed-out user request shows a clear retry message.
+- A completed engine start without a running audio context shows a clear retry message.
 - Pointer and keyboard activation start the microphone request.
 - One physical pointer tap does not start two microphone requests.
-- The app sends no audio, telemetry, or network request for this recovery flow.
+- No microphone audio, derived pitch data, or telemetry leaves the device.
+- Only existing same-origin static asset, version, and service-worker requests are allowed.
 
 ## Limits
 

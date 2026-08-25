@@ -65,6 +65,12 @@ function micRecoveryMessage(error: unknown): string {
   if (name === "NotSupportedError") {
     return "This browser does not support microphone access. Use a supported browser, then tap Try again.";
   }
+  if (name === "TimeoutError") {
+    return "Microphone access did not start. Close this page, open it again, then tap Try again.";
+  }
+  if (name === "NotRunningError") {
+    return "The microphone did not start. Check browser settings, then tap Try again.";
+  }
   return "The microphone did not start. Check browser settings, then tap Try again.";
 }
 
@@ -74,9 +80,17 @@ function targetsForPreset(preset: ReturnType<typeof getPresetById>): AnalysisTar
 
 type StartSource = "auto" | "user";
 
+const USER_MIC_START_TIMEOUT_MS = 20_000;
+
 interface StartInFlight {
   promise: Promise<void>;
   source: StartSource;
+}
+
+function namedError(name: string, message: string): Error {
+  const error = new Error(message);
+  error.name = name;
+  return error;
 }
 
 export async function bootstrapApp(root: HTMLElement): Promise<void> {
@@ -166,6 +180,12 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     micButton!.setAttribute("aria-label", "Enable microphone");
     micButtonLabel!.textContent = "Enable microphone";
   };
+  const showProgress = (): void => {
+    micRecovery!.hidden = false;
+    micRecovery!.textContent = "Waiting for microphone access.";
+    micButton!.setAttribute("aria-label", "Starting microphone");
+    micButtonLabel!.textContent = "Starting microphone...";
+  };
   const showRecovery = (error: unknown): void => {
     micRecovery!.hidden = false;
     micRecovery!.textContent = micRecoveryMessage(error);
@@ -186,10 +206,31 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     announce(renderState);
   });
 
-  const runStartAudio = async (token: number): Promise<void> => {
+  const runStartAudio = async (token: number, source: StartSource): Promise<void> => {
     const generation = lifecycleGeneration;
     try {
-      await engine.start(targetsForPreset(preset));
+      if (source === "user") showProgress();
+      const startPromise = engine.start(targetsForPreset(preset));
+      if (source === "user") {
+        let timeoutId: number | undefined;
+        try {
+          await Promise.race([
+            startPromise,
+            new Promise<never>((_resolve, reject) => {
+              timeoutId = window.setTimeout(() => {
+                reject(namedError(
+                  "TimeoutError",
+                  "The microphone request did not finish within 20 seconds.",
+                ));
+              }, USER_MIC_START_TIMEOUT_MS);
+            }),
+          ]);
+        } finally {
+          if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+        }
+      } else {
+        await startPromise;
+      }
       if (document.hidden || generation !== lifecycleGeneration || token !== activeStartToken) {
         if (token === activeStartToken) {
           await engine.stop();
@@ -202,6 +243,10 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
         if (token === activeStartToken) {
           audioWasLive = false;
           glassVeil.hidden = false;
+          showRecovery(namedError(
+            "NotRunningError",
+            "The audio context did not start.",
+          ));
           await engine.stop();
         }
         return;
@@ -236,7 +281,7 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
       source,
       promise: Promise.resolve(),
     };
-    entry.promise = runStartAudio(token).finally(() => {
+    entry.promise = runStartAudio(token, source).finally(() => {
       if (startInFlight === entry) {
         startInFlight = null;
       }

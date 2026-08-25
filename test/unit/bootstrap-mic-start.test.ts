@@ -186,6 +186,7 @@ function installModuleMocks(harness: Harness): void {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.resetModules();
   vi.unstubAllGlobals();
 });
@@ -241,6 +242,30 @@ describe("bootstrap mic startup", () => {
 
     expect(engine.stop).not.toHaveBeenCalled();
     expect(veil?.hidden).toBe(true);
+  });
+
+  it("shows progress immediately and recovers after a pending user start times out", async () => {
+    vi.useFakeTimers();
+    const harness: Harness = {
+      root: installDom(),
+      engines: [],
+      startResolvers: [],
+    };
+    installModuleMocks(harness);
+    const { bootstrapApp } = await import("../../src/app/bootstrap");
+
+    await bootstrapApp(harness.root as unknown as HTMLElement);
+    const engine = harness.engines[0];
+    harness.root.querySelector(".mic-button")?.dispatch("pointerup");
+
+    expect(harness.root.querySelector(".mic-button-label")?.textContent).toBe("Starting microphone...");
+    expect(harness.root.querySelector(".mic-recovery")?.textContent).toBe("Waiting for microphone access.");
+
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    expect(engine.stop).toHaveBeenCalledTimes(1);
+    expect(harness.root.querySelector(".mic-recovery")?.textContent).toContain("did not start");
+    expect(harness.root.querySelector(".mic-button-label")?.textContent).toBe("Try again");
   });
 
   it("shows recovery steps when a user denies microphone access", async () => {
@@ -325,5 +350,7 @@ describe("bootstrap mic startup", () => {
 
     expect(engine.stop).toHaveBeenCalledTimes(1);
     expect(veil?.hidden).toBe(false);
+    expect(harness.root.querySelector(".mic-recovery")?.textContent).toContain("did not start");
+    expect(harness.root.querySelector(".mic-button-label")?.textContent).toBe("Try again");
   });
 });

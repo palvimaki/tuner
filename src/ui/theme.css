@@ -351,6 +351,13 @@ button {
   z-index: 1;
 }
 
+.mic-activation {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  width: min(320px, calc(100% - 40px));
+}
+
 .glass-veil[hidden],
 .install-panel[hidden],
 .preset-panel[hidden] {
@@ -368,6 +375,22 @@ button {
     inset 0 1px 0 rgba(255, 249, 235, 0.14);
   position: relative;
   cursor: pointer;
+  pointer-events: auto;
+}
+
+.mic-button-label {
+  position: absolute;
+  inset-inline: 8px;
+  bottom: 14px;
+  color: rgba(255, 248, 232, 0.96);
+  font: 600 13px/1.2 ui-sans-serif, system-ui, sans-serif;
+}
+
+.mic-recovery {
+  margin: 0;
+  color: rgba(255, 248, 232, 0.96);
+  font: 400 15px/1.4 ui-sans-serif, system-ui, sans-serif;
+  text-align: center;
 }
 
 .mic-capsule {

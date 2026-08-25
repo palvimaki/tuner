@@ -22,6 +22,8 @@ import type { RenderState } from "../ui/scene";
 function buildGlassVeil(): HTMLDivElement {
   const veil = document.createElement("div");
   veil.className = "glass-veil";
+  const panel = document.createElement("div");
+  panel.className = "mic-activation";
   const button = document.createElement("button");
   button.type = "button";
   button.className = "mic-button";
@@ -32,9 +34,38 @@ function buildGlassVeil(): HTMLDivElement {
   stand.className = "mic-stand";
   const base = document.createElement("span");
   base.className = "mic-base";
-  button.append(capsule, stand, base);
-  veil.appendChild(button);
+  const label = document.createElement("span");
+  label.className = "mic-button-label";
+  label.textContent = "Enable microphone";
+  button.append(capsule, stand, base, label);
+  const recovery = document.createElement("p");
+  recovery.className = "mic-recovery";
+  recovery.hidden = true;
+  recovery.setAttribute("role", "status");
+  recovery.setAttribute("aria-live", "polite");
+  recovery.setAttribute("aria-atomic", "true");
+  panel.append(button, recovery);
+  veil.appendChild(panel);
   return veil;
+}
+
+function micRecoveryMessage(error: unknown): string {
+  const name = typeof error === "object" && error !== null && "name" in error
+    ? String(error.name)
+    : "";
+  if (name === "NotAllowedError") {
+    return "Allow microphone access in your browser settings. Then tap Try again.";
+  }
+  if (name === "NotFoundError") {
+    return "No microphone is available. Connect one, then tap Try again.";
+  }
+  if (name === "NotReadableError") {
+    return "Your microphone is busy. Close other apps, then tap Try again.";
+  }
+  if (name === "NotSupportedError") {
+    return "This browser does not support microphone access. Use a supported browser, then tap Try again.";
+  }
+  return "The microphone did not start. Check browser settings, then tap Try again.";
 }
 
 function targetsForPreset(preset: ReturnType<typeof getPresetById>): AnalysisTarget[] {
@@ -126,6 +157,21 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
   root.replaceChildren(shell);
 
   const engine = new AudioEngine(instrument, version);
+  const micButton = glassVeil.querySelector<HTMLButtonElement>("button");
+  const micButtonLabel = glassVeil.querySelector<HTMLSpanElement>(".mic-button-label");
+  const micRecovery = glassVeil.querySelector<HTMLParagraphElement>(".mic-recovery");
+  const clearRecovery = (): void => {
+    micRecovery!.hidden = true;
+    micRecovery!.textContent = "";
+    micButton!.setAttribute("aria-label", "Enable microphone");
+    micButtonLabel!.textContent = "Enable microphone";
+  };
+  const showRecovery = (error: unknown): void => {
+    micRecovery!.hidden = false;
+    micRecovery!.textContent = micRecoveryMessage(error);
+    micButton!.setAttribute("aria-label", "Try again");
+    micButtonLabel!.textContent = "Try again";
+  };
   let audioWasLive = false;
   let resumeAfterVisibilityRestore = false;
   let lifecycleGeneration = 0;
@@ -162,15 +208,16 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
       }
       markMicGranted();
       audioWasLive = true;
+      clearRecovery();
       glassVeil.hidden = true;
       await requestWakeLock();
-    } catch {
+    } catch (error) {
       if (token === activeStartToken) {
         audioWasLive = false;
         glassVeil.hidden = false;
+        showRecovery(error);
         await engine.stop().catch(() => undefined);
       }
-      // Keep the microphone prompt visible so the user can retry in-place.
     }
   };
 
@@ -198,11 +245,19 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     return entry.promise;
   };
 
-  const micButton = glassVeil.querySelector("button");
+  let skipNextPointerClick = false;
   micButton?.addEventListener("pointerup", () => {
+    skipNextPointerClick = true;
+    window.setTimeout(() => {
+      skipNextPointerClick = false;
+    }, 0);
     void startAudio("user");
   });
   micButton?.addEventListener("click", () => {
+    if (skipNextPointerClick) {
+      skipNextPointerClick = false;
+      return;
+    }
     void startAudio("user");
   });
 

@@ -243,6 +243,68 @@ describe("bootstrap mic startup", () => {
     expect(veil?.hidden).toBe(true);
   });
 
+  it("shows recovery steps when a user denies microphone access", async () => {
+    const harness: Harness = {
+      root: installDom(),
+      engines: [],
+      startResolvers: [],
+    };
+    installModuleMocks(harness);
+    const { bootstrapApp } = await import("../../src/app/bootstrap");
+
+    await bootstrapApp(harness.root as unknown as HTMLElement);
+    const engine = harness.engines[0];
+    const micButton = harness.root.querySelector(".mic-button");
+    engine.start.mockRejectedValueOnce(Object.assign(new Error("Permission denied"), {
+      name: "NotAllowedError",
+    }));
+
+    micButton?.dispatch("pointerup");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const recovery = harness.root.querySelector(".mic-recovery");
+    expect(recovery?.hidden).toBe(false);
+    expect(recovery?.textContent).toContain("Allow microphone access");
+    expect(harness.root.querySelector(".mic-button-label")?.textContent).toBe("Try again");
+  });
+
+  it("starts once for the pointerup and click from one physical tap", async () => {
+    const harness: Harness = {
+      root: installDom(),
+      engines: [],
+      startResolvers: [],
+    };
+    installModuleMocks(harness);
+    const { bootstrapApp } = await import("../../src/app/bootstrap");
+
+    await bootstrapApp(harness.root as unknown as HTMLElement);
+    const engine = harness.engines[0];
+    const micButton = harness.root.querySelector(".mic-button");
+
+    micButton?.dispatch("pointerup");
+    micButton?.dispatch("click");
+
+    expect(engine.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts from a keyboard click", async () => {
+    const harness: Harness = {
+      root: installDom(),
+      engines: [],
+      startResolvers: [],
+    };
+    installModuleMocks(harness);
+    const { bootstrapApp } = await import("../../src/app/bootstrap");
+
+    await bootstrapApp(harness.root as unknown as HTMLElement);
+    const engine = harness.engines[0];
+
+    harness.root.querySelector(".mic-button")?.dispatch("click");
+
+    expect(engine.start).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the mic affordance when an automatic start does not run the audio context", async () => {
     const harness: Harness = {
       root: installDom({ micGranted: true }),

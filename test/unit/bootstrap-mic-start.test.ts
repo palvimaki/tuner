@@ -411,6 +411,11 @@ describe("bootstrap mic startup", () => {
     micButton?.dispatch("pointerup");
     expect(engine.start).toHaveBeenCalledTimes(1);
 
+    harness.startResolvers[0]?.();
+    await flushMicrotasks();
+
+    expect(micButton?.disabled).toBe(true);
+
     finishStop?.();
     await flushMicrotasks();
 

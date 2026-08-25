@@ -309,13 +309,13 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
 
     // Invalidate this request before cleanup. Its eventual completion must not
     // replace the recovery state after the document returns.
-    activeStartToken += 1;
+    const cancellationToken = (activeStartToken += 1);
     audioWasLive = false;
     glassVeil.hidden = false;
     void (async () => {
       await engine.stop().catch(() => undefined);
-      if (startInFlight !== entry) return;
-      startInFlight = null;
+      if (activeStartToken !== cancellationToken) return;
+      if (startInFlight === entry) startInFlight = null;
       showRecovery(namedError(
         "NotRunningError",
         "The microphone request was stopped while the page was inactive.",

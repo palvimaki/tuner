@@ -4,7 +4,23 @@ import type { Instrument } from "../../src/domain/instrument";
 
 type Listener = (event?: { type: string }) => void;
 
-class FakeElement {
+class FakeEventTarget {
+  private readonly listeners = new Map<string, Listener[]>();
+
+  addEventListener(type: string, listener: Listener): void {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  dispatch(type: string): void {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener({ type });
+    }
+  }
+}
+
+class FakeElement extends FakeEventTarget {
   className = "";
   hidden = false;
   disabled = false;
@@ -20,9 +36,9 @@ class FakeElement {
   readonly style = {
     setProperty: vi.fn(),
   };
-  private readonly listeners = new Map<string, Listener[]>();
-
-  constructor(readonly tagName: string) {}
+  constructor(readonly tagName: string) {
+    super();
+  }
 
   append(...nodes: FakeElement[]): void {
     this.children.push(...nodes);
@@ -42,17 +58,9 @@ class FakeElement {
     Reflect.set(this, name, value);
   }
 
-  addEventListener(type: string, listener: Listener): void {
-    const listeners = this.listeners.get(type) ?? [];
-    listeners.push(listener);
-    this.listeners.set(type, listeners);
-  }
-
-  dispatch(type: string): void {
+  override dispatch(type: string): void {
     if (this.disabled) return;
-    for (const listener of this.listeners.get(type) ?? []) {
-      listener({ type });
-    }
+    super.dispatch(type);
   }
 
   querySelector(selector: string): FakeElement | null {
@@ -87,6 +95,9 @@ interface Harness {
   startResolvers: Array<() => void>;
 }
 
+let fakeDocument: FakeEventTarget & { hidden: boolean };
+let fakeWindow: FakeEventTarget;
+
 const instrument: Instrument = {
   id: "guitar",
   family: "guitar",
@@ -103,18 +114,16 @@ const instrument: Instrument = {
 
 function installDom(options: { micGranted?: boolean } = {}): FakeElement {
   const root = new FakeElement("div");
-  const documentStub = {
+  const documentStub = Object.assign(new FakeEventTarget(), {
     hidden: false,
     createElement: (tagName: string) => new FakeElement(tagName.toLowerCase()),
     createElementNS: (_namespace: string, tagName: string) => new FakeElement(tagName.toLowerCase()),
-    addEventListener: vi.fn(),
-  };
-  const windowStub = {
-    addEventListener: vi.fn(),
+  });
+  const windowStub = Object.assign(new FakeEventTarget(), {
     removeEventListener: vi.fn(),
     setTimeout,
     clearTimeout,
-  };
+  });
   const localStorageState = new Map<string, string>(
     options.micGranted ? [["tuner:mic-granted", "1"]] : [],
   );
@@ -129,6 +138,8 @@ function installDom(options: { micGranted?: boolean } = {}): FakeElement {
   vi.stubGlobal("window", windowStub);
   vi.stubGlobal("localStorage", localStorageStub);
   vi.stubGlobal("performance", { now: () => 1000 });
+  fakeDocument = documentStub;
+  fakeWindow = windowStub;
   return root;
 }
 
@@ -330,6 +341,73 @@ describe("bootstrap mic startup", () => {
 
     expect(micButton?.disabled).toBe(true);
     expect(harness.root.querySelector(".mic-button-label")?.textContent).toBe("Starting microphone...");
+    micButton?.dispatch("pointerup");
+    expect(engine.start).toHaveBeenCalledTimes(1);
+
+    finishStop?.();
+    await flushMicrotasks();
+
+    expect(micButton?.disabled).toBe(false);
+    expect(harness.root.querySelector(".mic-button-label")?.textContent).toBe("Try again");
+    micButton?.dispatch("pointerup");
+    expect(engine.start).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers after visibilitychange hides a pending user start", async () => {
+    const harness: Harness = {
+      root: installDom(),
+      engines: [],
+      startResolvers: [],
+    };
+    installModuleMocks(harness);
+    const { bootstrapApp } = await import("../../src/app/bootstrap");
+
+    await bootstrapApp(harness.root as unknown as HTMLElement);
+    const engine = harness.engines[0];
+    const micButton = harness.root.querySelector(".mic-button");
+    let finishStop: (() => void) | undefined;
+    engine.stop.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishStop = resolve;
+    }));
+
+    micButton?.dispatch("pointerup");
+    fakeDocument.hidden = true;
+    fakeDocument.dispatch("visibilitychange");
+
+    expect(micButton?.disabled).toBe(true);
+    micButton?.dispatch("pointerup");
+    expect(engine.start).toHaveBeenCalledTimes(1);
+
+    finishStop?.();
+    await flushMicrotasks();
+
+    expect(micButton?.disabled).toBe(false);
+    expect(harness.root.querySelector(".mic-button-label")?.textContent).toBe("Try again");
+    micButton?.dispatch("pointerup");
+    expect(engine.start).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers after pagehide interrupts a pending user start", async () => {
+    const harness: Harness = {
+      root: installDom(),
+      engines: [],
+      startResolvers: [],
+    };
+    installModuleMocks(harness);
+    const { bootstrapApp } = await import("../../src/app/bootstrap");
+
+    await bootstrapApp(harness.root as unknown as HTMLElement);
+    const engine = harness.engines[0];
+    const micButton = harness.root.querySelector(".mic-button");
+    let finishStop: (() => void) | undefined;
+    engine.stop.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishStop = resolve;
+    }));
+
+    micButton?.dispatch("pointerup");
+    fakeWindow.dispatch("pagehide");
+
+    expect(micButton?.disabled).toBe(true);
     micButton?.dispatch("pointerup");
     expect(engine.start).toHaveBeenCalledTimes(1);
 

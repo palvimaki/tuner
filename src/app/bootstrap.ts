@@ -303,6 +303,27 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     return entry.promise;
   };
 
+  const cancelPendingUserStart = (): boolean => {
+    const entry = startInFlight;
+    if (!entry || entry.source !== "user") return false;
+
+    // Invalidate this request before cleanup. Its eventual completion must not
+    // replace the recovery state after the document returns.
+    activeStartToken += 1;
+    audioWasLive = false;
+    glassVeil.hidden = false;
+    void (async () => {
+      await engine.stop().catch(() => undefined);
+      if (startInFlight !== entry) return;
+      startInFlight = null;
+      showRecovery(namedError(
+        "NotRunningError",
+        "The microphone request was stopped while the page was inactive.",
+      ));
+    })();
+    return true;
+  };
+
   let skipNextPointerClick = false;
   micButton?.addEventListener("pointerup", () => {
     skipNextPointerClick = true;
@@ -330,7 +351,7 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
       audioWasLive = false;
       glassVeil.hidden = false;
       void releaseWakeLock();
-      void engine.stop();
+      if (!cancelPendingUserStart()) void engine.stop();
       return;
     }
     if (resumeAfterVisibilityRestore) {
@@ -344,7 +365,7 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     audioWasLive = false;
     resumeAfterVisibilityRestore = false;
     void releaseWakeLock();
-    void engine.stop();
+    if (!cancelPendingUserStart()) void engine.stop();
   });
 
   window.addEventListener("beforeunload", () => {

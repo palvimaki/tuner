@@ -4,6 +4,16 @@
 
 Give a user clear recovery steps when microphone start fails.
 
+## Root cause
+
+The iOS Simulator WebKit browser showed the native permission flow on the first user request.
+The user denied that request.
+The app caught the resulting media-start failure.
+The app restored the unchanged microphone veil.
+The app showed no failure or recovery state.
+A second tap looked inert because the browser could not reopen permission by itself.
+This result does not prove behavior in real iPhone Chrome.
+
 ## Acceptance
 
 - A successful user request starts the tuner and hides the activation screen.

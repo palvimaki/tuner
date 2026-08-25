@@ -174,23 +174,30 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
   const micButton = glassVeil.querySelector<HTMLButtonElement>("button");
   const micButtonLabel = glassVeil.querySelector<HTMLSpanElement>(".mic-button-label");
   const micRecovery = glassVeil.querySelector<HTMLParagraphElement>(".mic-recovery");
+  const setMicButtonEnabled = (enabled: boolean): void => {
+    micButton!.disabled = !enabled;
+    micButton!.setAttribute("aria-disabled", String(!enabled));
+  };
   const clearRecovery = (): void => {
     micRecovery!.hidden = true;
     micRecovery!.textContent = "";
     micButton!.setAttribute("aria-label", "Enable microphone");
     micButtonLabel!.textContent = "Enable microphone";
+    setMicButtonEnabled(true);
   };
   const showProgress = (): void => {
     micRecovery!.hidden = false;
     micRecovery!.textContent = "Waiting for microphone access.";
     micButton!.setAttribute("aria-label", "Starting microphone");
     micButtonLabel!.textContent = "Starting microphone...";
+    setMicButtonEnabled(false);
   };
   const showRecovery = (error: unknown): void => {
     micRecovery!.hidden = false;
     micRecovery!.textContent = micRecoveryMessage(error);
     micButton!.setAttribute("aria-label", "Try again");
     micButtonLabel!.textContent = "Try again";
+    setMicButtonEnabled(true);
   };
   let audioWasLive = false;
   let resumeAfterVisibilityRestore = false;
@@ -243,11 +250,12 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
         if (token === activeStartToken) {
           audioWasLive = false;
           glassVeil.hidden = false;
+          await engine.stop().catch(() => undefined);
+          if (token !== activeStartToken) return;
           showRecovery(namedError(
             "NotRunningError",
             "The audio context did not start.",
           ));
-          await engine.stop();
         }
         return;
       }
@@ -260,23 +268,28 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
       if (token === activeStartToken) {
         audioWasLive = false;
         glassVeil.hidden = false;
-        showRecovery(error);
         await engine.stop().catch(() => undefined);
+        if (token === activeStartToken) showRecovery(error);
       }
     }
   };
 
-  const startAudio = (source: StartSource): Promise<void> => {
+  const startAudio = async (source: StartSource): Promise<void> => {
+    let token: number;
     if (startInFlight) {
       if (source !== "user" || startInFlight.source !== "auto") {
-        return startInFlight.promise;
+        await startInFlight.promise;
+        return;
       }
       lifecycleGeneration += 1;
+      token = (activeStartToken += 1);
       audioWasLive = false;
       glassVeil.hidden = false;
-      void engine.stop();
+      showProgress();
+      await engine.stop().catch(() => undefined);
+    } else {
+      token = (activeStartToken += 1);
     }
-    const token = (activeStartToken += 1);
     const entry: StartInFlight = {
       source,
       promise: Promise.resolve(),

@@ -37,14 +37,14 @@ function buildGlassVeil(): HTMLDivElement {
   const label = document.createElement("span");
   label.className = "mic-button-label";
   label.textContent = "Enable microphone";
-  button.append(capsule, stand, base, label);
+  button.append(capsule, stand, base);
   const recovery = document.createElement("p");
   recovery.className = "mic-recovery";
   recovery.hidden = true;
   recovery.setAttribute("role", "status");
   recovery.setAttribute("aria-live", "polite");
   recovery.setAttribute("aria-atomic", "true");
-  panel.append(button, recovery);
+  panel.append(button, label, recovery);
   veil.appendChild(panel);
   return veil;
 }

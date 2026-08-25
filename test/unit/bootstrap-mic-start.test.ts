@@ -211,6 +211,29 @@ afterEach(() => {
 });
 
 describe("bootstrap mic startup", () => {
+  it("places the microphone state label below the microphone button", async () => {
+    const harness: Harness = {
+      root: installDom(),
+      engines: [],
+      startResolvers: [],
+    };
+    installModuleMocks(harness);
+    const { bootstrapApp } = await import("../../src/app/bootstrap");
+
+    await bootstrapApp(harness.root as unknown as HTMLElement);
+
+    const activation = harness.root.querySelector(".mic-activation");
+    const micButton = harness.root.querySelector(".mic-button");
+    const label = harness.root.querySelector(".mic-button-label");
+
+    expect(activation?.children).toEqual([
+      micButton,
+      label,
+      harness.root.querySelector(".mic-recovery"),
+    ]);
+    expect(micButton?.children).not.toContain(label);
+  });
+
   it("lets a user tap replace a pending automatic mic start", async () => {
     const harness: Harness = {
       root: installDom({ micGranted: true }),

@@ -27,6 +27,9 @@ This result does not prove behavior in real iPhone Chrome.
 - A completed engine start without a running audio context shows a clear retry message.
 - Pointer and keyboard activation start the microphone request.
 - One physical pointer tap does not start two microphone requests.
+- The microphone state label does not overlap the microphone icon.
+- The activation, progress, and recovery states stay fully visible at 430 by 932 CSS pixels.
+- The microphone control and the two persistent top controls have touch targets of at least 44 by 44 CSS pixels.
 - No microphone audio, derived pitch data, or telemetry leaves the device.
 - Only existing same-origin static asset, version, and service-worker requests are allowed.
 

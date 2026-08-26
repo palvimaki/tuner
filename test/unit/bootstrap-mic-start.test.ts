@@ -234,7 +234,8 @@ describe("bootstrap mic startup", () => {
     expect(micButton?.children).not.toContain(label);
   });
 
-  it("lets a user tap replace a pending automatic mic start", async () => {
+  it("times out a replacement user start when prior cleanup never completes", async () => {
+    vi.useFakeTimers();
     const harness: Harness = {
       root: installDom({ micGranted: true }),
       engines: [],
@@ -245,18 +246,24 @@ describe("bootstrap mic startup", () => {
 
     await bootstrapApp(harness.root as unknown as HTMLElement);
     const engine = harness.engines[0];
+    engine.stop.mockImplementation(() => new Promise<void>(() => undefined));
     expect(engine.start).toHaveBeenCalledTimes(1);
 
     const micButton = harness.root.querySelector(".mic-button");
     expect(micButton).not.toBeNull();
-    micButton?.dispatch("pointerup");
+    micButton?.dispatch("click");
 
     expect(engine.stop).toHaveBeenCalledTimes(1);
-    await flushMicrotasks();
     expect(engine.start).toHaveBeenCalledTimes(2);
 
-    harness.startResolvers.forEach((resolve) => resolve());
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    expect(engine.stop).toHaveBeenCalledTimes(2);
+    expect(micButton?.disabled).toBe(false);
+    expect(harness.root.querySelector(".mic-button-label")?.textContent).toBe("Try again");
+
+    micButton?.dispatch("click");
+    expect(engine.start).toHaveBeenCalledTimes(3);
   });
 
   it("opens the tuner as soon as a user-started microphone request succeeds", async () => {
@@ -276,7 +283,7 @@ describe("bootstrap mic startup", () => {
     expect(engine.start).not.toHaveBeenCalled();
     expect(veil?.hidden).toBe(false);
 
-    micButton?.dispatch("pointerup");
+    micButton?.dispatch("click");
     expect(engine.start).toHaveBeenCalledTimes(1);
 
     harness.startResolvers[0]?.();
@@ -298,7 +305,7 @@ describe("bootstrap mic startup", () => {
 
     await bootstrapApp(harness.root as unknown as HTMLElement);
     const engine = harness.engines[0];
-    harness.root.querySelector(".mic-button")?.dispatch("pointerup");
+    harness.root.querySelector(".mic-button")?.dispatch("click");
 
     expect(harness.root.querySelector(".mic-button-label")?.textContent).toBe("Starting microphone...");
     expect(harness.root.querySelector(".mic-recovery")?.textContent).toBe("Waiting for microphone access.");
@@ -326,7 +333,7 @@ describe("bootstrap mic startup", () => {
       name: "NotAllowedError",
     }));
 
-    micButton?.dispatch("pointerup");
+    micButton?.dispatch("click");
     await flushMicrotasks();
 
     const recovery = harness.root.querySelector(".mic-recovery");
@@ -334,12 +341,12 @@ describe("bootstrap mic startup", () => {
     expect(recovery?.textContent).toContain("Allow microphone access");
     expect(harness.root.querySelector(".mic-button-label")?.textContent).toBe("Try again");
 
-    micButton?.dispatch("pointerup");
+    micButton?.dispatch("click");
 
     expect(engine.start).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps retry disabled until cleanup completes, then starts a new request", async () => {
+  it("recovers and starts a new request when engine cleanup never completes", async () => {
     const harness: Harness = {
       root: installDom(),
       engines: [],
@@ -351,29 +358,23 @@ describe("bootstrap mic startup", () => {
     await bootstrapApp(harness.root as unknown as HTMLElement);
     const engine = harness.engines[0];
     const micButton = harness.root.querySelector(".mic-button");
-    let finishStop: (() => void) | undefined;
     engine.start.mockRejectedValueOnce(Object.assign(new Error("Permission denied"), {
       name: "NotAllowedError",
     }));
-    engine.stop.mockImplementationOnce(() => new Promise<void>((resolve) => {
-      finishStop = resolve;
-    }));
+    engine.stop.mockImplementation(() => new Promise<void>(() => undefined));
 
-    micButton?.dispatch("pointerup");
-    await flushMicrotasks();
-
-    expect(micButton?.disabled).toBe(true);
-    expect(harness.root.querySelector(".mic-button-label")?.textContent).toBe("Starting microphone...");
-    micButton?.dispatch("pointerup");
-    expect(engine.start).toHaveBeenCalledTimes(1);
-
-    finishStop?.();
+    micButton?.dispatch("click");
     await flushMicrotasks();
 
     expect(micButton?.disabled).toBe(false);
     expect(harness.root.querySelector(".mic-button-label")?.textContent).toBe("Try again");
-    micButton?.dispatch("pointerup");
+    micButton?.dispatch("click");
     expect(engine.start).toHaveBeenCalledTimes(2);
+
+    harness.startResolvers[0]?.();
+    await flushMicrotasks();
+
+    expect(harness.root.querySelector(".glass-veil")?.hidden).toBe(true);
   });
 
   it("recovers after visibilitychange hides a pending user start", async () => {
@@ -388,26 +389,28 @@ describe("bootstrap mic startup", () => {
     await bootstrapApp(harness.root as unknown as HTMLElement);
     const engine = harness.engines[0];
     const micButton = harness.root.querySelector(".mic-button");
-    let finishStop: (() => void) | undefined;
-    engine.stop.mockImplementationOnce(() => new Promise<void>((resolve) => {
-      finishStop = resolve;
-    }));
+    engine.stop.mockImplementation(() => new Promise<void>(() => undefined));
 
-    micButton?.dispatch("pointerup");
+    micButton?.dispatch("click");
     fakeDocument.hidden = true;
     fakeDocument.dispatch("visibilitychange");
 
-    expect(micButton?.disabled).toBe(true);
-    micButton?.dispatch("pointerup");
-    expect(engine.start).toHaveBeenCalledTimes(1);
-
-    finishStop?.();
-    await flushMicrotasks();
-
     expect(micButton?.disabled).toBe(false);
     expect(harness.root.querySelector(".mic-button-label")?.textContent).toBe("Try again");
-    micButton?.dispatch("pointerup");
+    fakeDocument.hidden = false;
+    fakeDocument.dispatch("visibilitychange");
+    micButton?.dispatch("click");
     expect(engine.start).toHaveBeenCalledTimes(2);
+
+    harness.startResolvers[0]?.();
+    await flushMicrotasks();
+
+    expect(engine.stop).toHaveBeenCalledTimes(1);
+
+    harness.startResolvers[1]?.();
+    await flushMicrotasks();
+
+    expect(harness.root.querySelector(".glass-veil")?.hidden).toBe(true);
   });
 
   it("recovers after pagehide interrupts a pending user start", async () => {
@@ -422,30 +425,25 @@ describe("bootstrap mic startup", () => {
     await bootstrapApp(harness.root as unknown as HTMLElement);
     const engine = harness.engines[0];
     const micButton = harness.root.querySelector(".mic-button");
-    let finishStop: (() => void) | undefined;
-    engine.stop.mockImplementationOnce(() => new Promise<void>((resolve) => {
-      finishStop = resolve;
-    }));
+    engine.stop.mockImplementation(() => new Promise<void>(() => undefined));
 
-    micButton?.dispatch("pointerup");
+    micButton?.dispatch("click");
     fakeWindow.dispatch("pagehide");
 
-    expect(micButton?.disabled).toBe(true);
-    micButton?.dispatch("pointerup");
-    expect(engine.start).toHaveBeenCalledTimes(1);
+    expect(micButton?.disabled).toBe(false);
+    expect(harness.root.querySelector(".mic-button-label")?.textContent).toBe("Try again");
+    micButton?.dispatch("click");
+    expect(engine.start).toHaveBeenCalledTimes(2);
 
     harness.startResolvers[0]?.();
     await flushMicrotasks();
 
-    expect(micButton?.disabled).toBe(true);
+    expect(engine.stop).toHaveBeenCalledTimes(1);
 
-    finishStop?.();
+    harness.startResolvers[1]?.();
     await flushMicrotasks();
 
-    expect(micButton?.disabled).toBe(false);
-    expect(harness.root.querySelector(".mic-button-label")?.textContent).toBe("Try again");
-    micButton?.dispatch("pointerup");
-    expect(engine.start).toHaveBeenCalledTimes(2);
+    expect(harness.root.querySelector(".glass-veil")?.hidden).toBe(true);
   });
 
   it("shows busy microphone recovery copy", async () => {
@@ -463,7 +461,7 @@ describe("bootstrap mic startup", () => {
       name: "NotReadableError",
     }));
 
-    harness.root.querySelector(".mic-button")?.dispatch("pointerup");
+    harness.root.querySelector(".mic-button")?.dispatch("click");
     await flushMicrotasks();
 
     expect(harness.root.querySelector(".mic-recovery")?.textContent).toBe(
@@ -486,7 +484,7 @@ describe("bootstrap mic startup", () => {
       name: "NotSupportedError",
     }));
 
-    harness.root.querySelector(".mic-button")?.dispatch("pointerup");
+    harness.root.querySelector(".mic-button")?.dispatch("click");
     await flushMicrotasks();
 
     expect(harness.root.querySelector(".mic-recovery")?.textContent).toBe(
@@ -494,7 +492,7 @@ describe("bootstrap mic startup", () => {
     );
   });
 
-  it("starts once for the pointerup and click from one physical tap", async () => {
+  it("does not start from pointerup alone", async () => {
     const harness: Harness = {
       root: installDom(),
       engines: [],
@@ -508,12 +506,11 @@ describe("bootstrap mic startup", () => {
     const micButton = harness.root.querySelector(".mic-button");
 
     micButton?.dispatch("pointerup");
-    micButton?.dispatch("click");
 
-    expect(engine.start).toHaveBeenCalledTimes(1);
+    expect(engine.start).not.toHaveBeenCalled();
   });
 
-  it("starts from a keyboard click", async () => {
+  it("starts exactly once from one native click", async () => {
     const harness: Harness = {
       root: installDom(),
       engines: [],

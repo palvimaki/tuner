@@ -204,6 +204,11 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
   let lifecycleGeneration = 0;
   let activeStartToken = 0;
   let startInFlight: StartInFlight | null = null;
+  const detachEngine = (): void => {
+    // AudioEngine.stop() detaches its state before AudioContext.close() settles.
+    // Cleanup must not block recovery or the next user-started request.
+    void engine.stop().catch(() => undefined);
+  };
   engine.onFrame((frame) => {
     const nowMs = performance.now();
     applyAnalysisFrame(state, frame, preset, nowMs);
@@ -240,7 +245,7 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
       }
       if (document.hidden || generation !== lifecycleGeneration || token !== activeStartToken) {
         if (token === activeStartToken) {
-          await engine.stop();
+          detachEngine();
           audioWasLive = false;
           glassVeil.hidden = false;
         }
@@ -250,7 +255,7 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
         if (token === activeStartToken) {
           audioWasLive = false;
           glassVeil.hidden = false;
-          await engine.stop().catch(() => undefined);
+          detachEngine();
           if (token !== activeStartToken) return;
           showRecovery(namedError(
             "NotRunningError",
@@ -268,7 +273,7 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
       if (token === activeStartToken) {
         audioWasLive = false;
         glassVeil.hidden = false;
-        await engine.stop().catch(() => undefined);
+        detachEngine();
         if (token === activeStartToken) showRecovery(error);
       }
     }
@@ -286,7 +291,7 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
       audioWasLive = false;
       glassVeil.hidden = false;
       showProgress();
-      await engine.stop().catch(() => undefined);
+      detachEngine();
     } else {
       token = (activeStartToken += 1);
     }
@@ -309,34 +314,19 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
 
     // Invalidate this request before cleanup. Its eventual completion must not
     // replace the recovery state after the document returns.
-    const cancellationToken = (activeStartToken += 1);
+    activeStartToken += 1;
     audioWasLive = false;
     glassVeil.hidden = false;
-    void (async () => {
-      await engine.stop().catch(() => undefined);
-      if (activeStartToken !== cancellationToken) return;
-      if (startInFlight === entry) startInFlight = null;
-      showRecovery(namedError(
-        "NotRunningError",
-        "The microphone request was stopped while the page was inactive.",
-      ));
-    })();
+    detachEngine();
+    if (startInFlight === entry) startInFlight = null;
+    showRecovery(namedError(
+      "NotRunningError",
+      "The microphone request was stopped while the page was inactive.",
+    ));
     return true;
   };
 
-  let skipNextPointerClick = false;
-  micButton?.addEventListener("pointerup", () => {
-    skipNextPointerClick = true;
-    window.setTimeout(() => {
-      skipNextPointerClick = false;
-    }, 0);
-    void startAudio("user");
-  });
   micButton?.addEventListener("click", () => {
-    if (skipNextPointerClick) {
-      skipNextPointerClick = false;
-      return;
-    }
     void startAudio("user");
   });
 
@@ -351,7 +341,7 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
       audioWasLive = false;
       glassVeil.hidden = false;
       void releaseWakeLock();
-      if (!cancelPendingUserStart()) void engine.stop();
+      if (!cancelPendingUserStart()) detachEngine();
       return;
     }
     if (resumeAfterVisibilityRestore) {
@@ -365,13 +355,13 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     audioWasLive = false;
     resumeAfterVisibilityRestore = false;
     void releaseWakeLock();
-    if (!cancelPendingUserStart()) void engine.stop();
+    if (!cancelPendingUserStart()) detachEngine();
   });
 
   window.addEventListener("beforeunload", () => {
     lifecycleGeneration += 1;
     void releaseWakeLock();
-    void engine.stop();
+    detachEngine();
   });
 
   const initialRenderState = buildRenderState(

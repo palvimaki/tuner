@@ -13,7 +13,7 @@ body,
 #app {
   margin: 0;
   width: 100%;
-  min-height: 100%;
+  height: 100%;
   overflow: hidden;
   background:
     radial-gradient(circle at 20% 10%, rgba(196, 118, 53, 0.16), transparent 30%),
@@ -22,7 +22,6 @@ body,
 }
 
 body {
-  min-height: 100vh;
   overscroll-behavior: none;
   touch-action: manipulation;
 }
@@ -32,9 +31,12 @@ button {
 }
 
 .app-shell {
-  position: relative;
-  width: 100vw;
+  position: fixed;
+  inset: 0;
+  width: 100%;
   height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .stage {

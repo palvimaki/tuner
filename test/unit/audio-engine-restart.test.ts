@@ -48,6 +48,28 @@ afterEach(() => {
 });
 
 describe("AudioEngine restart after a lifecycle stop()", () => {
+  it("classifies unavailable browser audio capability as unsupported", async () => {
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+    vi.stubGlobal("AudioWorkletNode", FakeWorkletNode);
+    vi.stubGlobal("navigator", { mediaDevices: {} });
+
+    const engine = new AudioEngine(instrument, { appVersion: "0.1.20", buildTime: "" });
+
+    await expect(engine.start([])).rejects.toMatchObject({ name: "NotSupportedError" });
+  });
+
+  it("classifies a missing audio worklet node as unsupported", async () => {
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+    vi.stubGlobal("AudioWorkletNode", undefined);
+    vi.stubGlobal("navigator", {
+      mediaDevices: { getUserMedia: vi.fn(async () => fakeStream()) },
+    });
+
+    const engine = new AudioEngine(instrument, { appVersion: "0.1.20", buildTime: "" });
+
+    await expect(engine.start([])).rejects.toMatchObject({ name: "NotSupportedError" });
+  });
+
   it("aborts start() when AudioContext.resume() resolves without running", async () => {
     const contexts: FakeAudioContext[] = [];
     class RefusedResumeContext extends FakeAudioContext {
@@ -144,15 +166,18 @@ describe("AudioEngine restart after a lifecycle stop()", () => {
 
     // First tap: wedges on getUserMedia (the iOS permission-prompt case).
     const firstStart = engine.start([]);
-    await Promise.resolve();
+    await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1));
 
     // Page-lifecycle event fires while the prompt is open.
     await engine.stop();
     expect(contexts[0].closed).toBe(true);
 
     // getUserMedia finally resolves into a torn-down engine; must not throw.
-    releaseGum(fakeStream());
+    const firstStream = fakeStream();
+    const firstTrack = firstStream.getTracks()[0];
+    releaseGum(firstStream);
     await expect(firstStart).resolves.toBeUndefined();
+    expect(firstTrack.stop).toHaveBeenCalledTimes(1);
 
     // Second tap: a fresh, fully rebuilt start must succeed.
     (navigator.mediaDevices.getUserMedia as ReturnType<typeof vi.fn>).mockResolvedValueOnce(

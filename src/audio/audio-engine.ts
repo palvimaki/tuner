@@ -18,6 +18,22 @@ function rangeToBounds(rangeHz?: [number, number]): { minHz: number; maxHz: numb
 
 type FrameListener = (frame: AnalysisFrame) => void;
 
+function unsupportedAudioError(): DOMException {
+  return new DOMException("This browser cannot start the tuner microphone.", "NotSupportedError");
+}
+
+function assertAudioSupport(): void {
+  if (
+    typeof navigator === "undefined"
+    || !navigator.mediaDevices
+    || typeof navigator.mediaDevices.getUserMedia !== "function"
+    || typeof AudioContext === "undefined"
+    || typeof AudioWorkletNode === "undefined"
+  ) {
+    throw unsupportedAudioError();
+  }
+}
+
 export class AudioEngine {
   private context: AudioContext | null = null;
   private processor: AudioWorkletNode | null = null;
@@ -43,8 +59,20 @@ export class AudioEngine {
   }
 
   async start(targets: AnalysisTarget[]): Promise<void> {
-    const context = this.context ?? new AudioContext({ latencyHint: "interactive" });
-    this.context = context;
+    assertAudioSupport();
+    let context = this.context;
+    if (!context) {
+      try {
+        context = new AudioContext({ latencyHint: "interactive" });
+      } catch (error) {
+        if (error instanceof TypeError) throw unsupportedAudioError();
+        throw error;
+      }
+      this.context = context;
+    }
+    if (!context.audioWorklet || typeof context.audioWorklet.addModule !== "function") {
+      throw unsupportedAudioError();
+    }
     if (context.state === "suspended") {
       await context.resume();
       // iOS standalone can suspend/tear down the page while resume() is

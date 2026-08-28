@@ -166,15 +166,18 @@ describe("AudioEngine restart after a lifecycle stop()", () => {
 
     // First tap: wedges on getUserMedia (the iOS permission-prompt case).
     const firstStart = engine.start([]);
-    await Promise.resolve();
+    await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1));
 
     // Page-lifecycle event fires while the prompt is open.
     await engine.stop();
     expect(contexts[0].closed).toBe(true);
 
     // getUserMedia finally resolves into a torn-down engine; must not throw.
-    releaseGum(fakeStream());
+    const firstStream = fakeStream();
+    const firstTrack = firstStream.getTracks()[0];
+    releaseGum(firstStream);
     await expect(firstStart).resolves.toBeUndefined();
+    expect(firstTrack.stop).toHaveBeenCalledTimes(1);
 
     // Second tap: a fresh, fully rebuilt start must succeed.
     (navigator.mediaDevices.getUserMedia as ReturnType<typeof vi.fn>).mockResolvedValueOnce(

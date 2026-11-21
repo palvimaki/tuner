@@ -93,8 +93,8 @@ export class AudioEngine {
         numberOfOutputs: 1,
         outputChannelCount: [1],
         processorOptions: {
-          onsetThresholdDb: 8,
-          onsetDebounceMs: 140,
+          onsetThresholdDb: 6,
+          onsetDebounceMs: 100,
           targets,
           ...rangeToBounds(this.instrument.analysis?.rangeHz),
         },
@@ -130,8 +130,8 @@ export class AudioEngine {
     this.processor?.port.postMessage({
       type: "config",
       targets,
-      onsetThresholdDb: 8,
-      onsetDebounceMs: 140,
+      onsetThresholdDb: 6,
+      onsetDebounceMs: 100,
       ...rangeToBounds(this.instrument.analysis?.rangeHz),
     });
   }

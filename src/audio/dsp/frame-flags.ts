@@ -1,5 +1,5 @@
-export const TRANSIENT_SUPPRESS_MS = 120;
-export const STABLE_TAIL_CENTS = 25;
+export const TRANSIENT_SUPPRESS_MS = 60;
+export const STABLE_TAIL_CENTS = 12;
 export const STABLE_TAIL_FRAMES = 3;
 export const LOW_CONFIDENCE_THRESHOLD = 0.6;
 

@@ -661,4 +661,140 @@ describe("string switching hysteresis", () => {
 
     expect(state.activeStringId).toBe("E4");
   });
+
+  it("detects a deeply detuned string (-140 cents) when switching without onset", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "E4";
+    state.mode = "latched";
+    const detunedA2Hz = 110 * 2 ** (-140 / 1200);
+
+    for (let frameIndex = 0; frameIndex < 4; frameIndex += 1) {
+      applyAnalysisFrame(
+        state,
+        {
+          hz: detunedA2Hz,
+          clarity: 0.96,
+          confidence: 0.96,
+          rmsDb: -22,
+          shortRmsDb: -22,
+          slowRmsDb: -32,
+          onset: false,
+          variance: 1e-3,
+          amplitude: 0.2,
+          sampleWindow: 4096,
+          profileScores: {
+            E2: -28,
+            A2: -14,
+            D3: -24,
+            G3: -30,
+            B3: -34,
+            E4: -38,
+          },
+          timestampMs: 0,
+        },
+        preset,
+        200 + frameIndex * 20,
+      );
+    }
+
+    expect(state.activeStringId).toBe("A2");
+  });
+
+  it("switches immediately on a distinct high-confidence onset pluck", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+    state.activeStringId = "E2";
+    state.mode = "latched";
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: 329.628,
+        clarity: 0.96,
+        confidence: 0.96,
+        rmsDb: -18,
+        shortRmsDb: -18,
+        slowRmsDb: -34,
+        onset: true,
+        transientSuppressed: true,
+        lowConfidence: true,
+        variance: 1e-3,
+        amplitude: 0.25,
+        sampleWindow: 2048,
+        profileScores: {
+          E2: -36,
+          A2: -30,
+          D3: -25,
+          G3: -20,
+          B3: -14,
+          E4: -4,
+        },
+        timestampMs: 0,
+      },
+      preset,
+      200,
+    );
+
+    expect(state.activeStringId).toBe("E4");
+  });
+
+  it("admits quiet high-confidence plucks down to -62 dBFS and clears stale active strings after 900 ms", () => {
+    const preset = guitarPresets[0];
+    const state = createInitialState(preset);
+
+    for (let i = 0; i < 2; i += 1) {
+      applyAnalysisFrame(
+        state,
+        {
+          hz: 329.628,
+          clarity: 0.92,
+          confidence: 0.92,
+          rmsDb: -60,
+          shortRmsDb: -60,
+          slowRmsDb: -65,
+          onset: false,
+          variance: 1e-4,
+          amplitude: 0.01,
+          sampleWindow: 2048,
+          profileScores: {
+            E2: -45,
+            A2: -42,
+            D3: -38,
+            G3: -30,
+            B3: -24,
+            E4: -12,
+          },
+          timestampMs: 0,
+        },
+        preset,
+        100 + i * 20,
+      );
+    }
+
+    expect(state.activeStringId).toBe("E4");
+
+    applyAnalysisFrame(
+      state,
+      {
+        hz: 0,
+        clarity: 0,
+        confidence: 0,
+        rmsDb: -80,
+        shortRmsDb: -80,
+        slowRmsDb: -80,
+        onset: false,
+        variance: 0,
+        amplitude: 0,
+        sampleWindow: 2048,
+        profileScores: {},
+        timestampMs: 0,
+      },
+      preset,
+      1_050,
+    );
+
+    expect(state.activeStringId).toBeNull();
+    expect(state.mode).toBe("probing");
+  });
 });

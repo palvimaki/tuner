@@ -10,14 +10,16 @@ const YIN_THRESHOLD = 0.15;
 const YIN_MIN_HZ = 55;
 const YIN_MAX_HZ = 1400;
 const HIGH_PASS_POLE = 0.996;
-const TRANSIENT_SUPPRESS_MS = 120;
-const STABLE_TAIL_CENTS = 25;
+const TRANSIENT_SUPPRESS_MS = 60;
+const STABLE_TAIL_CENTS = 12;
 const STABLE_TAIL_FRAMES = 3;
 const TARGET_SEARCH_CENTS = 140;
 const TARGET_MAX_CMNDF = 0.45;
 const RAW_RELATION_MAX_CENTS = 45;
 const MAX_HARMONIC_RELATION = 4;
 const PROFILE_FLOOR_DB = -180;
+const ONSET_FLOOR_DB = -58;
+const ONSET_RMS_WINDOW = 512;
 
 function toDb(value) {
   return 20 * Math.log10(Math.max(value, 1e-9));
@@ -54,16 +56,153 @@ function centsBetween(hz, referenceHz) {
   return 1200 * Math.log2(hz / referenceHz);
 }
 
-// ---- YIN ----
+// ---- YIN (FFT-accelerated full-window difference) ----
+const fftPlans = new Map();
+
+function getFftPlan(size) {
+  let plan = fftPlans.get(size);
+  if (plan) return plan;
+
+  const half = size >> 1;
+  const bits = Math.round(Math.log2(size));
+  const bitrev = new Uint32Array(size);
+  for (let i = 0; i < size; i += 1) {
+    let x = i;
+    let rev = 0;
+    for (let b = 0; b < bits; b += 1) {
+      rev = (rev << 1) | (x & 1);
+      x >>= 1;
+    }
+    bitrev[i] = rev;
+  }
+
+  const cos = new Float64Array(half);
+  const sin = new Float64Array(half);
+  for (let i = 0; i < half; i += 1) {
+    const angle = (-2 * Math.PI * i) / size;
+    cos[i] = Math.cos(angle);
+    sin[i] = Math.sin(angle);
+  }
+
+  plan = {
+    size,
+    bitrev,
+    cos,
+    sin,
+    re: new Float64Array(size),
+    im: new Float64Array(size),
+    prefixSq: new Float64Array(size + 1),
+  };
+  fftPlans.set(size, plan);
+  return plan;
+}
+
+function fftInPlace(re, im, plan) {
+  const n = plan.size;
+  const bitrev = plan.bitrev;
+  const cos = plan.cos;
+  const sin = plan.sin;
+
+  for (let i = 0; i < n; i += 1) {
+    const j = bitrev[i];
+    if (i < j) {
+      const tr = re[i];
+      re[i] = re[j];
+      re[j] = tr;
+      const ti = im[i];
+      im[i] = im[j];
+      im[j] = ti;
+    }
+  }
+
+  for (let len = 2; len <= n; len <<= 1) {
+    const halfLen = len >> 1;
+    const step = n / len;
+    for (let i = 0; i < n; i += len) {
+      let tableIdx = 0;
+      for (let j = 0; j < halfLen; j += 1) {
+        const idx1 = i + j;
+        const idx2 = idx1 + halfLen;
+        const wr = cos[tableIdx];
+        const wi = sin[tableIdx];
+        const xr = re[idx2];
+        const xi = im[idx2];
+        const tRe = wr * xr - wi * xi;
+        const tIm = wr * xi + wi * xr;
+        re[idx2] = re[idx1] - tRe;
+        im[idx2] = im[idx1] - tIm;
+        re[idx1] += tRe;
+        im[idx1] += tIm;
+        tableIdx += step;
+      }
+    }
+  }
+}
+
 function yinDifference(input, maxTau) {
   const out = new Float32Array(maxTau);
+  const n = input.length;
+  const windowLength = Math.max(1, n - maxTau);
+  let fftSize = 1;
+  while (fftSize < n) fftSize <<= 1;
+
+  const plan = getFftPlan(fftSize);
+  const re = plan.re;
+  const im = plan.im;
+  const prefixSq = plan.prefixSq;
+
+  re.fill(0);
+  im.fill(0);
+  prefixSq[0] = 0;
+  for (let i = 0; i < n; i += 1) {
+    const v = input[i];
+    if (i < windowLength) re[i] = v;
+    im[i] = v;
+    prefixSq[i + 1] = prefixSq[i] + v * v;
+  }
+
+  fftInPlace(re, im, plan);
+
+  const half = fftSize >> 1;
+  const a0 = re[0];
+  const b0 = im[0];
+  re[0] = a0 * b0;
+  im[0] = 0;
+  if (half > 0) {
+    const ah = re[half];
+    const bh = im[half];
+    re[half] = ah * bh;
+    im[half] = 0;
+  }
+
+  for (let k = 1; k < half; k += 1) {
+    const j = fftSize - k;
+    const rk = re[k];
+    const rj = re[j];
+    const ik = im[k];
+    const ij = im[j];
+    const ar = 0.5 * (rk + rj);
+    const ai = 0.5 * (ik - ij);
+    const br = 0.5 * (ik + ij);
+    const bi = 0.5 * (rj - rk);
+    // conj(conj(A) * B) so forward FFT yields M * sum_i a[i] * b[i + tau]
+    const pr = ar * br + ai * bi;
+    const pi = ai * br - ar * bi;
+    re[k] = pr;
+    im[k] = pi;
+    re[j] = pr;
+    im[j] = -pi;
+  }
+
+  fftInPlace(re, im, plan);
+
+  const e0 = prefixSq[windowLength];
+  const invSize = 1 / fftSize;
   for (let tau = 1; tau < maxTau; tau += 1) {
-    let sum = 0;
-    for (let i = 0; i < maxTau; i += 1) {
-      const delta = input[i] - input[i + tau];
-      sum += delta * delta;
-    }
-    out[tau] = sum;
+    const eTau = prefixSq[tau + windowLength] - prefixSq[tau];
+    const corr = re[tau] * invSize;
+    const val = e0 + eTau - 2 * corr;
+    out[tau] = val > 0 ? val : 0;
   }
   return out;
 }
@@ -117,6 +256,28 @@ function findPitchYIN(input, sampleRate, minHz, maxHz) {
       }
     }
     tauEst = bestTau;
+  } else if (cmnd[tauEst] > 0.015) {
+    const origTau = tauEst;
+    const origVal = cmnd[origTau];
+    let bestSubVal = origVal;
+    for (const mult of [2, 3]) {
+      const center = Math.round(origTau * mult);
+      if (center < minTau || center >= maxTau - 2) continue;
+      const lo = Math.max(minTau, center - 3);
+      const hi = Math.min(maxTau - 2, center + 3);
+      let localTau = lo;
+      let localVal = cmnd[lo];
+      for (let t = lo + 1; t <= hi; t += 1) {
+        if (cmnd[t] < localVal) {
+          localVal = cmnd[t];
+          localTau = t;
+        }
+      }
+      if (localVal < origVal * 0.4 && localVal < 0.08 && localVal < bestSubVal) {
+        bestSubVal = localVal;
+        tauEst = localTau;
+      }
+    }
   }
 
   const cmndAtTau = cmnd[tauEst];
@@ -329,7 +490,7 @@ function findPitchMPM(input, sampleRate) {
 class TunerProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
-    const { targets = [], onsetThresholdDb = 8, onsetDebounceMs = 140, minHz = YIN_MIN_HZ, maxHz = YIN_MAX_HZ } =
+    const { targets = [], onsetThresholdDb = 6, onsetDebounceMs = 100, minHz = YIN_MIN_HZ, maxHz = YIN_MAX_HZ } =
       options.processorOptions || {};
     this.targets = targets;
     this.onsetThresholdDb = onsetThresholdDb;
@@ -337,10 +498,14 @@ class TunerProcessor extends AudioWorkletProcessor {
     this.minHz = minHz;
     this.maxHz = maxHz;
     this.buffer = new Float32Array(4096);
+    this.smallWindow = new Float32Array(2048);
+    this.largeWindow = new Float32Array(4096);
     this.writeIndex = 0;
     this.totalSamples = 0;
     this.slowRmsDb = -120;
+    this.hasSlowRms = false;
     this.lastOnsetMs = -10_000;
+    this.lastOnsetSample = -100_000;
     this.hpState = 0;
     this.hpPrevInput = 0;
     this.lpState = 0;
@@ -358,8 +523,8 @@ class TunerProcessor extends AudioWorkletProcessor {
     };
   }
 
-  copyWindow(size) {
-    const out = new Float32Array(size);
+  copyWindowInto(out) {
+    const size = out.length;
     const start = (this.writeIndex - size + this.buffer.length) % this.buffer.length;
     for (let i = 0; i < size; i += 1) {
       out[i] = this.buffer[(start + i) % this.buffer.length];
@@ -367,8 +532,24 @@ class TunerProcessor extends AudioWorkletProcessor {
     return out;
   }
 
+  copyWindow(size) {
+    return this.copyWindowInto(new Float32Array(size));
+  }
+
   profileScores(signal) {
     const scores = {};
+    const bandCache = new Map();
+    const cachedBandMag = (hz) => {
+      const key = Math.round(hz * 100);
+      let mag = bandCache.get(key);
+      if (mag === undefined) {
+        mag = bandMagnitude(signal, sampleRate, hz);
+        bandCache.set(key, mag);
+      }
+      return mag;
+    };
+    const cachedBandDb = (hz) => toDb(cachedBandMag(hz));
+
     for (const target of this.targets) {
       const lowerSameNoteTargets = this.targets
         .filter((candidate) => candidate.id !== target.id)
@@ -382,18 +563,18 @@ class TunerProcessor extends AudioWorkletProcessor {
         lowerSameNoteTargets.length === 0
           ? PROFILE_FLOOR_DB
           : lowerSameNoteTargets.reduce((max, candidate) => {
-              return Math.max(max, bandDb(signal, sampleRate, candidate.hz));
+              return Math.max(max, cachedBandDb(candidate.hz));
             }, PROFILE_FLOOR_DB);
       const upperPenalty =
         upperSameNoteTargets.length === 0
           ? PROFILE_FLOOR_DB
           : upperSameNoteTargets.reduce((max, candidate) => {
-              return Math.max(max, bandDb(signal, sampleRate, candidate.hz));
+              return Math.max(max, cachedBandDb(candidate.hz));
             }, PROFILE_FLOOR_DB);
-      const fundamentalMag = bandMagnitude(signal, sampleRate, target.hz);
-      const secondMag = bandMagnitude(signal, sampleRate, target.hz * 2);
-      const thirdMag = bandMagnitude(signal, sampleRate, target.hz * 3);
-      const fourthMag = bandMagnitude(signal, sampleRate, target.hz * 4);
+      const fundamentalMag = cachedBandMag(target.hz);
+      const secondMag = cachedBandMag(target.hz * 2);
+      const thirdMag = cachedBandMag(target.hz * 3);
+      const fourthMag = cachedBandMag(target.hz * 4);
       const fundamental = toDb(fundamentalMag);
       const second = toDb(secondMag);
       const fourth = toDb(fourthMag);
@@ -439,52 +620,79 @@ class TunerProcessor extends AudioWorkletProcessor {
     }
     this.analysisCounter = 0;
 
-    const small = this.copyWindow(2048);
-    const large = this.copyWindow(4096);
+    const small = this.copyWindowInto(this.smallWindow);
+    const large = this.copyWindowInto(this.largeWindow);
 
-    // Short-frame RMS / onset detection runs every analysis hop.
+    // Short-frame RMS / onset detection over 1 analysis hop (512 samples) so
+    // low-string sub-cycle ripples do not fire spurious re-onsets.
     let sum = 0;
     let mean = 0;
-    for (let i = 0; i < 256; i += 1) {
-      const sample = large[large.length - 256 + i];
+    const rmsOffset = large.length - ONSET_RMS_WINDOW;
+    for (let i = 0; i < ONSET_RMS_WINDOW; i += 1) {
+      const sample = large[rmsOffset + i];
       sum += sample * sample;
       mean += sample;
     }
-    mean /= 256;
+    mean /= ONSET_RMS_WINDOW;
     let variance = 0;
-    for (let i = 0; i < 256; i += 1) {
-      const delta = large[large.length - 256 + i] - mean;
+    for (let i = 0; i < ONSET_RMS_WINDOW; i += 1) {
+      const delta = large[rmsOffset + i] - mean;
       variance += delta * delta;
     }
-    variance /= 256;
-    const shortRms = Math.sqrt(sum / 256);
+    variance /= ONSET_RMS_WINDOW;
+    const shortRms = Math.sqrt(sum / ONSET_RMS_WINDOW);
     const shortRmsDb = toDb(shortRms);
-    const hopMs = (512 / sampleRate) * 1000;
-    const alpha = 1 - Math.exp(-hopMs / 180);
-    this.slowRmsDb = this.slowRmsDb + alpha * (shortRmsDb - this.slowRmsDb);
     const nowMs = currentTime * 1000;
+    if (!this.hasSlowRms) {
+      this.slowRmsDb = shortRmsDb;
+      this.hasSlowRms = true;
+    }
+    const prevSlowRmsDb = this.slowRmsDb;
     const onset =
-      shortRmsDb >= -54 &&
-      shortRmsDb - this.slowRmsDb >= this.onsetThresholdDb &&
+      shortRmsDb >= ONSET_FLOOR_DB &&
+      shortRmsDb - prevSlowRmsDb >= this.onsetThresholdDb &&
       nowMs - this.lastOnsetMs >= this.onsetDebounceMs;
-    if (onset) this.lastOnsetMs = nowMs;
+    const hopMs = (512 / sampleRate) * 1000;
+    const tauMs = shortRmsDb > prevSlowRmsDb ? 80 : 220;
+    const alpha = 1 - Math.exp(-hopMs / tauMs);
+    this.slowRmsDb = onset ? shortRmsDb : prevSlowRmsDb + alpha * (shortRmsDb - prevSlowRmsDb);
+    if (onset) {
+      this.lastOnsetMs = nowMs;
+      this.lastOnsetSample = this.totalSamples;
+      this.hzHistory = [];
+      this.recentHz = [];
+    }
 
     const transientSuppressed = nowMs - this.lastOnsetMs < TRANSIENT_SUPPRESS_MS;
+    const samplesSinceOnset = this.totalSamples - this.lastOnsetSample;
 
-    // YIN on both windows; pick best by confidence with a small bias toward
-    // the larger window (lower error on low strings).
+    // YIN on both windows; after a fresh onset prefer the small window once it
+    // contains post-onset audio so the large window cannot linger on the prior string.
     const yinSmall = findPitchYIN(small, sampleRate, this.minHz, this.maxHz);
     const yinLarge = findPitchYIN(large, sampleRate, this.minHz, this.maxHz);
-    const preferLarge =
-      yinSmall.hz < 110 ||
-      yinSmall.confidence < 0.7 ||
-      yinLarge.confidence >= yinSmall.confidence - 0.05;
+    let preferLarge;
+    if (samplesSinceOnset >= 2048 && samplesSinceOnset < 4096 && yinSmall.confidence >= 0.72) {
+      if (yinSmall.hz >= 100 && yinSmall.confidence >= 0.78) {
+        preferLarge = false;
+      } else {
+        preferLarge = yinLarge.confidence > yinSmall.confidence + 0.02;
+      }
+    } else {
+      const nonHarmonicTransition =
+        yinSmall.hz >= 100 &&
+        yinSmall.confidence >= 0.85 &&
+        yinLarge.hz > 0 &&
+        Math.abs(centsBetween(yinSmall.hz, yinLarge.hz)) > 150 &&
+        !rawRelation(yinSmall.hz, yinLarge.hz, yinLarge.hz);
+      preferLarge =
+        !nonHarmonicTransition &&
+        (yinSmall.hz < 110 ||
+          yinSmall.confidence < 0.7 ||
+          yinLarge.confidence >= yinSmall.confidence - 0.03);
+    }
     const yin = preferLarge ? yinLarge : yinSmall;
     const signal = preferLarge ? large : small;
     const sampleWindow = preferLarge ? 4096 : 2048;
-
-    // MPM kept as a debug-only secondary candidate.
-    const mpm = findPitchMPM(signal, sampleRate);
 
     const stringScores = this.profileScores(signal);
     const corrected = resolveTargetAwarePitch(yin, sampleRate, this.targets, stringScores);
@@ -494,24 +702,35 @@ class TunerProcessor extends AudioWorkletProcessor {
 
     const rawHz = yin.hz;
     const correctedHz = f0CandidateHz;
-    if (correctedHz > 0 && !transientSuppressed) {
-      if (onset) this.hzHistory = [correctedHz];
-      else {
-        this.hzHistory.push(correctedHz);
-        if (this.hzHistory.length > 3) this.hzHistory.shift();
+    let hz = 0;
+    if (onset) {
+      hz = correctedHz > 0 && confidence >= 0.65 ? correctedHz : 0;
+    } else if (!transientSuppressed) {
+      if (correctedHz > 0 && confidence >= 0.55) {
+        const prevMedian =
+          this.hzHistory.length === 0
+            ? 0
+            : [...this.hzHistory].sort((a, b) => a - b)[Math.floor(this.hzHistory.length / 2)];
+        if (prevMedian > 0 && confidence >= 0.7 && Math.abs(centsBetween(correctedHz, prevMedian)) > 150) {
+          this.hzHistory = [correctedHz];
+        } else {
+          this.hzHistory.push(correctedHz);
+          if (this.hzHistory.length > 3) this.hzHistory.shift();
+        }
+      } else if (correctedHz <= 0 || confidence < 0.45) {
+        this.hzHistory = [];
       }
-    } else if (!correctedHz) {
-      this.hzHistory = [];
+      hz =
+        this.hzHistory.length === 0
+          ? 0
+          : [...this.hzHistory].sort((a, b) => a - b)[Math.floor(this.hzHistory.length / 2)];
     }
-    const hz = this.hzHistory.length === 0
-      ? 0
-      : [...this.hzHistory].sort((a, b) => a - b)[Math.floor(this.hzHistory.length / 2)];
 
     // Stable-tail: last N raw frames within STABLE_TAIL_CENTS of one another.
-    if (rawHz > 0 && correctedHz > 0 && !transientSuppressed) {
+    if (rawHz > 0 && correctedHz > 0 && confidence >= 0.55 && !transientSuppressed) {
       this.recentHz.push(rawHz);
       if (this.recentHz.length > STABLE_TAIL_FRAMES) this.recentHz.shift();
-    } else if (transientSuppressed || rawHz <= 0 || correctedHz <= 0) {
+    } else if (transientSuppressed || rawHz <= 0 || correctedHz <= 0 || confidence < 0.45) {
       this.recentHz = [];
     }
     let stableTail = false;
@@ -550,8 +769,6 @@ class TunerProcessor extends AudioWorkletProcessor {
         yinConfidence: yin.confidence,
         cmndAtTau: corrected.cmndAtTau,
         rawCmndAtTau: yin.cmndAtTau,
-        mpmHz: mpm.hz,
-        mpmClarity: mpm.clarity,
         targetStringId: corrected.targetId,
         targetRelation: corrected.relation?.kind,
         targetRelationMultiple: corrected.relation?.multiple,

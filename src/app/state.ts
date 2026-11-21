@@ -5,10 +5,10 @@ import { resolveStringTargetHz, type InstrumentString, type TuningPreset } from 
 export type TunerMode = "idle" | "probing" | "latched" | "locked" | "completed";
 export const TUNE_LOCK_MS = 500;
 export const LOCK_STABLE_FRAMES = 2;
-export const BASE_LOCK_TOLERANCE_CENTS = 8;
-export const LOW_STRING_LOCK_TOLERANCE_CENTS = 13;
-export const B_STRING_LOCK_TOLERANCE_CENTS = 10;
-export const NEAR_TUNED_JITTER_TOLERANCE_CENTS = 6;
+export const BASE_LOCK_TOLERANCE_CENTS = 4;
+export const LOW_STRING_LOCK_TOLERANCE_CENTS = 6.5;
+export const B_STRING_LOCK_TOLERANCE_CENTS = 5;
+export const NEAR_TUNED_JITTER_TOLERANCE_CENTS = 3;
 export const LOW_STRING_LOCK_HZ = 90;
 export const HIGH_CONFIDENCE_CLARITY = 0.9;
 export const HIGH_CONFIDENCE_RMS_DB = -45;
@@ -16,6 +16,9 @@ const DIRECT_FRAME_MIN_CONFIDENCE = 0.7;
 const CORRECTED_FRAME_MIN_CONFIDENCE = 0.55;
 const PROFILE_PENALTY_CENTS_PER_DB = 5;
 const PROFILE_PENALTY_MAX_CENTS = 120;
+const MAX_STRING_PITCH_DISTANCE_CENTS = 220;
+const STALE_ACTIVE_TIMEOUT_MS = 900;
+const ONSET_SWITCH_MIN_DELTA_CENTS = 150;
 
 export interface StringVisualState {
   cents: number | null;
@@ -38,6 +41,7 @@ export interface AppState {
   probeStringId: string | null;
   probeLeadFrames: number;
   onsetLatchUntilMs: number;
+  lastOnsetAtMs: number;
   switchLeadFrames: number;
   lastGoodFrameAtMs: number;
   lastActivityAtMs: number;
@@ -61,6 +65,7 @@ export function createInitialState(preset: TuningPreset): AppState {
     probeStringId: null,
     probeLeadFrames: 0,
     onsetLatchUntilMs: 0,
+    lastOnsetAtMs: -Infinity,
     switchLeadFrames: 0,
     lastGoodFrameAtMs: 0,
     lastActivityAtMs: 0,
@@ -126,8 +131,9 @@ function frameAdmitted(frame: AnalysisFrame): boolean {
         ? CORRECTED_FRAME_MIN_CONFIDENCE
         : DIRECT_FRAME_MIN_CONFIDENCE
       : 0.82;
+  const minRmsDb = pitchConfidence >= 0.85 ? -64 : -55;
   return (
-    frame.rmsDb >= -55 &&
+    frame.rmsDb >= minRmsDb &&
     pitchConfidence >= minConfidence &&
     Object.keys(frame.profileScores).length > 0
   );
@@ -138,12 +144,16 @@ function frameTransient(frame: AnalysisFrame): boolean {
   return frame.onset === true || frame.transientSuppressed === true || legacy.transient === true;
 }
 
-function frameHighConfidence(frame: AnalysisFrame): boolean {
-  if (frame.lowConfidence === true) return false;
+function framePitchStrong(frame: AnalysisFrame): boolean {
   if (typeof frame.confidence === "number") {
     return frame.confidence >= DIRECT_FRAME_MIN_CONFIDENCE;
   }
   return frame.clarity >= HIGH_CONFIDENCE_CLARITY && frame.rmsDb >= HIGH_CONFIDENCE_RMS_DB;
+}
+
+function frameHighConfidence(frame: AnalysisFrame): boolean {
+  if (frame.lowConfidence === true) return false;
+  return framePitchStrong(frame);
 }
 
 function frameStableTail(frame: AnalysisFrame): boolean {
@@ -153,10 +163,18 @@ function frameStableTail(frame: AnalysisFrame): boolean {
 function smoothCents(previous: number | null, next: number | null): number | null {
   if (next === null) return null;
   if (previous === null || Math.abs(next - previous) > 150) return next;
-  return previous + (next - previous) * 0.32;
+  return previous + (next - previous) * 0.42;
 }
 
-function hydrateFrameIntoStrings(state: AppState, frame: AnalysisFrame, preset: TuningPreset): void {
+function hydrateFrameLevels(state: AppState, frame: AnalysisFrame, preset: TuningPreset): void {
+  for (const stringDef of preset.strings) {
+    const targetState = state.strings[stringDef.id];
+    targetState.amplitude = frame.amplitude;
+    targetState.scoreDb = frame.profileScores[stringDef.id] ?? -120;
+  }
+}
+
+function hydrateFramePitchIntoStrings(state: AppState, frame: AnalysisFrame, preset: TuningPreset): void {
   for (const stringDef of preset.strings) {
     const targetState = state.strings[stringDef.id];
     if (frame.hz > 0) {
@@ -171,8 +189,15 @@ function hydrateFrameIntoStrings(state: AppState, frame: AnalysisFrame, preset: 
       targetState.pitchPenaltyCents = 0;
       targetState.cents = smoothCents(targetState.cents, null);
     }
-    targetState.amplitude = frame.amplitude;
-    targetState.scoreDb = frame.profileScores[stringDef.id] ?? -120;
+  }
+}
+
+function clearPitchState(state: AppState): void {
+  for (const stringState of Object.values(state.strings)) {
+    stringState.rawCents = null;
+    stringState.instantCents = null;
+    stringState.cents = null;
+    stringState.pitchPenaltyCents = 0;
   }
 }
 
@@ -207,7 +232,7 @@ function weightedPitchDistance(
 function likelyFrameString(
   state: AppState,
   preset: TuningPreset,
-): { stringDef: InstrumentString; scoreDb: number; pitchDistance: number } | null {
+): { stringDef: InstrumentString; scoreDb: number; pitchDistance: number; basePitchDistance: number } | null {
   const frameBestScoreDb = bestProfileScore(state);
   const candidates = preset.strings
     .map((stringDef) => {
@@ -219,20 +244,18 @@ function likelyFrameString(
         basePitchDistance: candidatePitchDistance(stringState),
       };
     })
-    .filter((candidate) => candidate.basePitchDistance <= 120);
+    .filter((candidate) => candidate.basePitchDistance <= MAX_STRING_PITCH_DISTANCE_CENTS);
 
-  const ranked = candidates
-    .filter((candidate) => candidate.pitchDistance <= 120)
-    .sort((a, b) => {
-      const distanceDelta = sameNoteClass(a.stringDef, b.stringDef)
-        ? a.basePitchDistance - b.basePitchDistance
-        : a.pitchDistance - b.pitchDistance;
-      if (!sameNoteClass(a.stringDef, b.stringDef) && Math.abs(distanceDelta) >= 12) {
-        return distanceDelta;
-      }
-      if (Math.abs(distanceDelta) >= 30) return distanceDelta;
-      return b.scoreDb - a.scoreDb;
-    });
+  const ranked = candidates.sort((a, b) => {
+    const distanceDelta = sameNoteClass(a.stringDef, b.stringDef)
+      ? a.basePitchDistance - b.basePitchDistance
+      : a.pitchDistance - b.pitchDistance;
+    if (!sameNoteClass(a.stringDef, b.stringDef) && Math.abs(distanceDelta) >= 12) {
+      return distanceDelta;
+    }
+    if (Math.abs(distanceDelta) >= 30) return distanceDelta;
+    return b.scoreDb - a.scoreDb;
+  });
 
   return ranked[0] ?? null;
 }
@@ -249,7 +272,6 @@ function bestChallenger(
 } | null {
   const active = preset.strings.find((stringDef) => stringDef.id === state.activeStringId);
   if (!active) return null;
-  const activeState = state.strings[active.id];
   const frameBestScoreDb = bestProfileScore(state);
   const candidates = preset.strings
     .filter((stringDef) => stringDef.id !== active.id)
@@ -263,7 +285,7 @@ function bestChallenger(
         marginDb: sameNoteClass(stringDef, active) ? 6 : 3,
       };
     })
-    .filter((candidate) => candidate.pitchDistance <= 120)
+    .filter((candidate) => candidate.basePitchDistance <= MAX_STRING_PITCH_DISTANCE_CENTS)
     .sort((a, b) => {
       const distanceDelta = sameNoteClass(a.stringDef, b.stringDef)
         ? a.basePitchDistance - b.basePitchDistance
@@ -334,14 +356,15 @@ export function applyAnalysisFrame(
     Object.assign(state, fresh);
   }
 
-  hydrateFrameIntoStrings(state, frame, preset);
+  hydrateFrameLevels(state, frame, preset);
 
   if (!frameAdmitted(frame)) {
-    if (state.activeStringId && nowMs - state.lastGoodFrameAtMs >= 2_500) {
+    if (state.activeStringId && nowMs - state.lastGoodFrameAtMs >= STALE_ACTIVE_TIMEOUT_MS) {
       state.activeStringId = null;
       state.mode = "probing";
       state.switchLeadFrames = 0;
       resetProbe(state);
+      clearPitchState(state);
     }
     return { lockedStringId: null, completed: false };
   }
@@ -351,8 +374,23 @@ export function applyAnalysisFrame(
   if (state.mode === "idle") state.mode = "probing";
 
   const transient = frameTransient(frame);
+  if (!transient || (frame.onset && frame.hz > 0)) {
+    hydrateFramePitchIntoStrings(state, frame, preset);
+  }
+
   const highConfidence = frameHighConfidence(frame);
   const stableTail = frameStableTail(frame);
+
+  if (frame.onset) {
+    state.lastOnsetAtMs = nowMs;
+    if (state.activeStringId) {
+      const activeState = state.strings[state.activeStringId];
+      if (activeState) {
+        activeState.lockStartedMs = null;
+        activeState.inToleranceFrames = 0;
+      }
+    }
+  }
 
   if (frame.onset && frame.hz > 0 && !state.activeStringId) {
     const target = state.manualTargetStringId
@@ -360,11 +398,29 @@ export function applyAnalysisFrame(
       : undefined;
     const detected = target ? null : likelyFrameString(state, preset);
     const nearest = target ?? detected?.stringDef ?? nearestPresetStringByLogDistance(frame.hz, preset);
-    latchString(state, nearest.id, nowMs, 100);
+    latchString(state, nearest.id, nowMs, 60);
+  } else if (
+    frame.onset &&
+    frame.hz > 0 &&
+    state.activeStringId &&
+    !state.manualTargetStringId &&
+    framePitchStrong(frame)
+  ) {
+    const activeDef = preset.strings.find((s) => s.id === state.activeStringId);
+    const detected = likelyFrameString(state, preset);
+    const candidate = detected?.stringDef ?? nearestPresetStringByLogDistance(frame.hz, preset);
+    if (
+      activeDef &&
+      candidate.id !== state.activeStringId &&
+      Math.abs(centsFromHz(frame.hz, resolveStringTargetHz(activeDef))) >= ONSET_SWITCH_MIN_DELTA_CENTS &&
+      Math.abs(centsFromHz(frame.hz, resolveStringTargetHz(candidate))) <= MAX_STRING_PITCH_DISTANCE_CENTS
+    ) {
+      latchString(state, candidate.id, nowMs, 60);
+    }
   } else if (frame.hz > 0 && !state.activeStringId && highConfidence) {
     // Acquire by probe only when we have high-confidence evidence.
     if (state.manualTargetStringId) {
-      latchString(state, state.manualTargetStringId, nowMs, 80);
+      latchString(state, state.manualTargetStringId, nowMs, 60);
     } else {
       const detected = likelyFrameString(state, preset);
       if (detected) {
@@ -375,7 +431,7 @@ export function applyAnalysisFrame(
           state.probeLeadFrames = 1;
         }
         if (state.probeLeadFrames >= 2) {
-          latchString(state, detected.stringDef.id, nowMs, 80);
+          latchString(state, detected.stringDef.id, nowMs, 60);
         }
       } else {
         resetProbe(state);
@@ -401,6 +457,7 @@ export function applyAnalysisFrame(
         challenger && activeDef && sameNoteClass(challenger.stringDef, activeDef)
           ? candidatePitchDistance(activeState)
           : activePitchDistance;
+      const requiredSwitchFrames = nowMs - state.lastOnsetAtMs <= 150 ? 2 : 4;
 
       if (
         challenger &&
@@ -412,7 +469,7 @@ export function applyAnalysisFrame(
             challenger.scoreDb >= activeState.scoreDb + challenger.marginDb))
       ) {
         state.switchLeadFrames += 1;
-        if (state.switchLeadFrames >= 4) {
+        if (state.switchLeadFrames >= requiredSwitchFrames) {
           state.activeStringId = challenger.stringDef.id;
           state.switchLeadFrames = 0;
           // Reset lock progress on the previous string.
@@ -423,8 +480,8 @@ export function applyAnalysisFrame(
         state.switchLeadFrames = 0;
       }
     } else {
-      // Low confidence or transient: hold previous active, no switch.
-      state.switchLeadFrames = 0;
+      // Low confidence or transient: hold previous active, decay switch lead gently.
+      state.switchLeadFrames = Math.max(0, state.switchLeadFrames - 1);
     }
 
     const currentId = state.activeStringId;

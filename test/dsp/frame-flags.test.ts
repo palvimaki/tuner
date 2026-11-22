@@ -21,8 +21,9 @@ describe("frame flags", () => {
     expect(isLowConfidence(0.85, false)).toBe(false);
   });
 
-  it("flags a stable tail only when last N frames agree within 25 cents", () => {
+  it("flags a stable tail only when last N frames agree within 12 cents", () => {
     expect(isStableTail([110, 110.2, 109.9])).toBe(true);
+    expect(isStableTail([110, 111.0, 110])).toBe(false);
     expect(isStableTail([110, 130, 110])).toBe(false);
     expect(isStableTail([0, 110, 110])).toBe(false);
     expect(isStableTail([110])).toBe(false);

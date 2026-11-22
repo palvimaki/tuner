@@ -13,7 +13,7 @@ body,
 #app {
   margin: 0;
   width: 100%;
-  min-height: 100%;
+  height: 100%;
   overflow: hidden;
   background:
     radial-gradient(circle at 20% 10%, rgba(196, 118, 53, 0.16), transparent 30%),
@@ -22,7 +22,6 @@ body,
 }
 
 body {
-  min-height: 100vh;
   overscroll-behavior: none;
   touch-action: manipulation;
 }
@@ -32,9 +31,12 @@ button {
 }
 
 .app-shell {
-  position: relative;
-  width: 100vw;
+  position: fixed;
+  inset: 0;
+  width: 100%;
   height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .stage {
@@ -102,8 +104,8 @@ button {
   position: absolute;
   top: max(18px, env(safe-area-inset-top));
   left: max(18px, env(safe-area-inset-left));
-  width: 38px;
-  height: 38px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   border: 1px solid rgba(238, 217, 170, 0.28);
   background: rgba(34, 26, 20, 0.42);
@@ -132,8 +134,8 @@ button {
   position: absolute;
   top: max(18px, env(safe-area-inset-top));
   right: max(18px, env(safe-area-inset-right));
-  width: 38px;
-  height: 38px;
+  width: 44px;
+  height: 44px;
   border: 1px solid rgba(238, 217, 170, 0.18);
   border-radius: 50%;
   background: rgba(34, 26, 20, 0.42);
@@ -351,6 +353,13 @@ button {
   z-index: 1;
 }
 
+.mic-activation {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  width: min(320px, calc(100% - 40px));
+}
+
 .glass-veil[hidden],
 .install-panel[hidden],
 .preset-panel[hidden] {
@@ -368,6 +377,20 @@ button {
     inset 0 1px 0 rgba(255, 249, 235, 0.14);
   position: relative;
   cursor: pointer;
+  pointer-events: auto;
+}
+
+.mic-button-label {
+  color: rgba(255, 248, 232, 0.96);
+  font: 600 13px/1.2 ui-sans-serif, system-ui, sans-serif;
+  text-align: center;
+}
+
+.mic-recovery {
+  margin: 0;
+  color: rgba(255, 248, 232, 0.96);
+  font: 400 15px/1.4 ui-sans-serif, system-ui, sans-serif;
+  text-align: center;
 }
 
 .mic-capsule {

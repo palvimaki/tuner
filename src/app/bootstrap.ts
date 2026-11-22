@@ -22,6 +22,8 @@ import type { RenderState } from "../ui/scene";
 function buildGlassVeil(): HTMLDivElement {
   const veil = document.createElement("div");
   veil.className = "glass-veil";
+  const panel = document.createElement("div");
+  panel.className = "mic-activation";
   const button = document.createElement("button");
   button.type = "button";
   button.className = "mic-button";
@@ -32,9 +34,44 @@ function buildGlassVeil(): HTMLDivElement {
   stand.className = "mic-stand";
   const base = document.createElement("span");
   base.className = "mic-base";
+  const label = document.createElement("span");
+  label.className = "mic-button-label";
+  label.textContent = "Enable microphone";
   button.append(capsule, stand, base);
-  veil.appendChild(button);
+  const recovery = document.createElement("p");
+  recovery.className = "mic-recovery";
+  recovery.hidden = true;
+  recovery.setAttribute("role", "status");
+  recovery.setAttribute("aria-live", "polite");
+  recovery.setAttribute("aria-atomic", "true");
+  panel.append(button, label, recovery);
+  veil.appendChild(panel);
   return veil;
+}
+
+function micRecoveryMessage(error: unknown): string {
+  const name = typeof error === "object" && error !== null && "name" in error
+    ? String(error.name)
+    : "";
+  if (name === "NotAllowedError") {
+    return "Allow microphone access in your browser settings. Then tap Try again.";
+  }
+  if (name === "NotFoundError") {
+    return "No microphone is available. Connect one, then tap Try again.";
+  }
+  if (name === "NotReadableError") {
+    return "Your microphone is busy. Close other apps, then tap Try again.";
+  }
+  if (name === "NotSupportedError") {
+    return "This browser does not support microphone access. Use a supported browser, then tap Try again.";
+  }
+  if (name === "TimeoutError") {
+    return "Microphone access did not start. Close this page, open it again, then tap Try again.";
+  }
+  if (name === "NotRunningError") {
+    return "The microphone did not start. Check browser settings, then tap Try again.";
+  }
+  return "The microphone did not start. Check browser settings, then tap Try again.";
 }
 
 function targetsForPreset(preset: ReturnType<typeof getPresetById>): AnalysisTarget[] {
@@ -43,9 +80,17 @@ function targetsForPreset(preset: ReturnType<typeof getPresetById>): AnalysisTar
 
 type StartSource = "auto" | "user";
 
+const USER_MIC_START_TIMEOUT_MS = 20_000;
+
 interface StartInFlight {
   promise: Promise<void>;
   source: StartSource;
+}
+
+function namedError(name: string, message: string): Error {
+  const error = new Error(message);
+  error.name = name;
+  return error;
 }
 
 export async function bootstrapApp(root: HTMLElement): Promise<void> {
@@ -126,11 +171,44 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
   root.replaceChildren(shell);
 
   const engine = new AudioEngine(instrument, version);
+  const micButton = glassVeil.querySelector<HTMLButtonElement>("button");
+  const micButtonLabel = glassVeil.querySelector<HTMLSpanElement>(".mic-button-label");
+  const micRecovery = glassVeil.querySelector<HTMLParagraphElement>(".mic-recovery");
+  const setMicButtonEnabled = (enabled: boolean): void => {
+    micButton!.disabled = !enabled;
+    micButton!.setAttribute("aria-disabled", String(!enabled));
+  };
+  const clearRecovery = (): void => {
+    micRecovery!.hidden = true;
+    micRecovery!.textContent = "";
+    micButton!.setAttribute("aria-label", "Enable microphone");
+    micButtonLabel!.textContent = "Enable microphone";
+    setMicButtonEnabled(true);
+  };
+  const showProgress = (): void => {
+    micRecovery!.hidden = false;
+    micRecovery!.textContent = "Waiting for microphone access.";
+    micButton!.setAttribute("aria-label", "Starting microphone");
+    micButtonLabel!.textContent = "Starting microphone...";
+    setMicButtonEnabled(false);
+  };
+  const showRecovery = (error: unknown): void => {
+    micRecovery!.hidden = false;
+    micRecovery!.textContent = micRecoveryMessage(error);
+    micButton!.setAttribute("aria-label", "Try again");
+    micButtonLabel!.textContent = "Try again";
+    setMicButtonEnabled(true);
+  };
   let audioWasLive = false;
   let resumeAfterVisibilityRestore = false;
   let lifecycleGeneration = 0;
   let activeStartToken = 0;
   let startInFlight: StartInFlight | null = null;
+  const detachEngine = (): void => {
+    // AudioEngine.stop() detaches its state before AudioContext.close() settles.
+    // Cleanup must not block recovery or the next user-started request.
+    void engine.stop().catch(() => undefined);
+  };
   engine.onFrame((frame) => {
     const nowMs = performance.now();
     applyAnalysisFrame(state, frame, preset, nowMs);
@@ -140,13 +218,34 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     announce(renderState);
   });
 
-  const runStartAudio = async (token: number): Promise<void> => {
+  const runStartAudio = async (token: number, source: StartSource): Promise<void> => {
     const generation = lifecycleGeneration;
     try {
-      await engine.start(targetsForPreset(preset));
+      if (source === "user") showProgress();
+      const startPromise = engine.start(targetsForPreset(preset));
+      if (source === "user") {
+        let timeoutId: number | undefined;
+        try {
+          await Promise.race([
+            startPromise,
+            new Promise<never>((_resolve, reject) => {
+              timeoutId = window.setTimeout(() => {
+                reject(namedError(
+                  "TimeoutError",
+                  "The microphone request did not finish within 20 seconds.",
+                ));
+              }, USER_MIC_START_TIMEOUT_MS);
+            }),
+          ]);
+        } finally {
+          if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+        }
+      } else {
+        await startPromise;
+      }
       if (document.hidden || generation !== lifecycleGeneration || token !== activeStartToken) {
         if (token === activeStartToken) {
-          await engine.stop();
+          detachEngine();
           audioWasLive = false;
           glassVeil.hidden = false;
         }
@@ -156,40 +255,51 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
         if (token === activeStartToken) {
           audioWasLive = false;
           glassVeil.hidden = false;
-          await engine.stop();
+          detachEngine();
+          if (token !== activeStartToken) return;
+          showRecovery(namedError(
+            "NotRunningError",
+            "The audio context did not start.",
+          ));
         }
         return;
       }
       markMicGranted();
       audioWasLive = true;
+      clearRecovery();
       glassVeil.hidden = true;
       await requestWakeLock();
-    } catch {
+    } catch (error) {
       if (token === activeStartToken) {
         audioWasLive = false;
         glassVeil.hidden = false;
-        await engine.stop().catch(() => undefined);
+        detachEngine();
+        if (token === activeStartToken) showRecovery(error);
       }
-      // Keep the microphone prompt visible so the user can retry in-place.
     }
   };
 
-  const startAudio = (source: StartSource): Promise<void> => {
+  const startAudio = async (source: StartSource): Promise<void> => {
+    let token: number;
     if (startInFlight) {
       if (source !== "user" || startInFlight.source !== "auto") {
-        return startInFlight.promise;
+        await startInFlight.promise;
+        return;
       }
       lifecycleGeneration += 1;
+      token = (activeStartToken += 1);
       audioWasLive = false;
       glassVeil.hidden = false;
-      void engine.stop();
+      showProgress();
+      detachEngine();
+    } else {
+      token = (activeStartToken += 1);
     }
-    const token = (activeStartToken += 1);
     const entry: StartInFlight = {
       source,
       promise: Promise.resolve(),
     };
-    entry.promise = runStartAudio(token).finally(() => {
+    entry.promise = runStartAudio(token, source).finally(() => {
       if (startInFlight === entry) {
         startInFlight = null;
       }
@@ -198,10 +308,24 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     return entry.promise;
   };
 
-  const micButton = glassVeil.querySelector("button");
-  micButton?.addEventListener("pointerup", () => {
-    void startAudio("user");
-  });
+  const cancelPendingUserStart = (): boolean => {
+    const entry = startInFlight;
+    if (!entry || entry.source !== "user") return false;
+
+    // Invalidate this request before cleanup. Its eventual completion must not
+    // replace the recovery state after the document returns.
+    activeStartToken += 1;
+    audioWasLive = false;
+    glassVeil.hidden = false;
+    detachEngine();
+    if (startInFlight === entry) startInFlight = null;
+    showRecovery(namedError(
+      "NotRunningError",
+      "The microphone request was stopped while the page was inactive.",
+    ));
+    return true;
+  };
+
   micButton?.addEventListener("click", () => {
     void startAudio("user");
   });
@@ -217,7 +341,7 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
       audioWasLive = false;
       glassVeil.hidden = false;
       void releaseWakeLock();
-      void engine.stop();
+      if (!cancelPendingUserStart()) detachEngine();
       return;
     }
     if (resumeAfterVisibilityRestore) {
@@ -231,13 +355,13 @@ export async function bootstrapApp(root: HTMLElement): Promise<void> {
     audioWasLive = false;
     resumeAfterVisibilityRestore = false;
     void releaseWakeLock();
-    void engine.stop();
+    if (!cancelPendingUserStart()) detachEngine();
   });
 
   window.addEventListener("beforeunload", () => {
     lifecycleGeneration += 1;
     void releaseWakeLock();
-    void engine.stop();
+    detachEngine();
   });
 
   const initialRenderState = buildRenderState(

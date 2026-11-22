@@ -29,9 +29,10 @@ function parabolicTau(d: ArrayLike<number>, tau: number): number {
 
 export function computeDifference(input: ArrayLike<number>, maxTau: number): Float32Array {
   const out = new Float32Array(maxTau);
+  const windowLength = Math.max(1, input.length - maxTau);
   for (let tau = 1; tau < maxTau; tau += 1) {
     let sum = 0;
-    for (let i = 0; i < maxTau; i += 1) {
+    for (let i = 0; i < windowLength; i += 1) {
       const delta = (input[i] ?? 0) - (input[i + tau] ?? 0);
       sum += delta * delta;
     }
@@ -91,6 +92,31 @@ export function findPitchYin(
       }
     }
     tauEstimate = bestTau;
+  } else if ((cmnd[tauEstimate] ?? 1) > 0.015) {
+    // Guard against first-dip octave-up locks on weak-fundamental plucks by
+    // checking whether 2x or 3x period has a markedly deeper periodicity dip.
+    const origTau = tauEstimate;
+    const origVal = cmnd[origTau] ?? 1;
+    let bestSubVal = origVal;
+    for (const mult of [2, 3]) {
+      const center = Math.round(origTau * mult);
+      if (center < minTau || center >= maxTau - 2) continue;
+      const lo = Math.max(minTau, center - 3);
+      const hi = Math.min(maxTau - 2, center + 3);
+      let localTau = lo;
+      let localVal = cmnd[lo] ?? 1;
+      for (let t = lo + 1; t <= hi; t += 1) {
+        const v = cmnd[t] ?? 1;
+        if (v < localVal) {
+          localVal = v;
+          localTau = t;
+        }
+      }
+      if (localVal < origVal * 0.4 && localVal < 0.08 && localVal < bestSubVal) {
+        bestSubVal = localVal;
+        tauEstimate = localTau;
+      }
+    }
   }
 
   const refined = parabolicTau(cmnd, tauEstimate);

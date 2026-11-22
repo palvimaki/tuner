@@ -74,4 +74,15 @@ describe("YIN pitch detection", () => {
     expect(cents).toBeGreaterThan(-50);
     expect(cents).toBeLessThan(50);
   });
+
+  it("recovers low E (E2) when fundamental is heavily attenuated on phone-style mics", () => {
+    const target = 82.4069;
+    const signal = makePluckSignal(target, {
+      length: 4096,
+      harmonics: [0.05, 0.45, 1.0, 0.55, 0.25],
+    });
+    const result = findPitchYin(signal, SR);
+    expect(Math.abs(centsFrom(result.hz, target))).toBeLessThan(5);
+    expect(result.confidence).toBeGreaterThan(0.9);
+  });
 });

@@ -257,4 +257,74 @@ describe("production worklet frame contract", () => {
     expect(last?.debug?.targetStringId).toBe("D4");
     expect(Math.abs((last?.hz ?? 0) - D4_HZ)).toBeLessThan(1.5);
   });
+
+  it("recovers weak-fundamental E2 directly without lingering on third-harmonic B3 and resets history on new pluck", () => {
+    let ProcessorClass!: new (options: unknown) => {
+      process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean;
+    };
+    const posted: Array<{
+      hz: number;
+      lowConfidence?: boolean;
+      stableTail?: boolean;
+      timestampMs: number;
+      debug?: { targetStringId?: string };
+    }> = [];
+    const context = {
+      console,
+      sampleRate: SAMPLE_RATE,
+      currentTime: 0,
+      AudioWorkletProcessor: class {
+        port = { postMessage: (message: typeof posted[number]) => posted.push(message), onmessage: null };
+      },
+      registerProcessor: (_name: string, cls: typeof ProcessorClass) => {
+        ProcessorClass = cls;
+      },
+    };
+    vm.createContext(context);
+    vm.runInContext(readFileSync("public/worklets/tuner-processor.js", "utf8"), context);
+
+    const targets = [
+      ["E2", LOW_E_HZ],
+      ["A2", 110],
+      ["D3", 146.8324],
+      ["G3", 195.9977],
+      ["B3", B3_HZ],
+      ["E4", E4_HZ],
+    ].map(([id, hz]) => ({ id, hz }));
+    const processor = new ProcessorClass({
+      processorOptions: { targets, onsetThresholdDb: 6, onsetDebounceMs: 100 },
+    });
+
+    const lowESig = makePluck(LOW_E_HZ, 0.5, [0.05, 0.4, 1, 0.5, 0.25]);
+    const highESig = makePluck(E4_HZ, 0.5, [0.5, 1, 0.7, 0.4]);
+    const output = new Float32Array(128);
+
+    let cursorSamples = 0;
+    for (let offset = 0; offset + 128 <= lowESig.length; offset += 128) {
+      context.currentTime = cursorSamples / SAMPLE_RATE;
+      processor.process([[lowESig.slice(offset, offset + 128)]], [[output]]);
+      cursorSamples += 128;
+    }
+
+    const lowEValid = posted.filter((frame) => !frame.lowConfidence && frame.hz > 0);
+    expect(lowEValid.length).toBeGreaterThan(0);
+    expect(lowEValid[0].timestampMs).toBeLessThan(120);
+    expect(lowEValid[0].debug?.targetStringId).toBe("E2");
+    expect(Math.abs(1200 * Math.log2(lowEValid[0].hz / LOW_E_HZ))).toBeLessThan(4);
+
+    const switchMs = (cursorSamples / SAMPLE_RATE) * 1000;
+    const beforeSwitch = posted.length;
+    for (let offset = 0; offset + 128 <= highESig.length; offset += 128) {
+      context.currentTime = cursorSamples / SAMPLE_RATE;
+      processor.process([[highESig.slice(offset, offset + 128)]], [[output]]);
+      cursorSamples += 128;
+    }
+
+    const highEValid = posted
+      .slice(beforeSwitch)
+      .filter((frame) => !frame.lowConfidence && frame.hz > 0 && frame.debug?.targetStringId === "E4");
+    expect(highEValid.length).toBeGreaterThan(0);
+    expect(highEValid[0].timestampMs - switchMs).toBeLessThan(80);
+    expect(Math.abs(1200 * Math.log2(highEValid[0].hz / E4_HZ))).toBeLessThan(4);
+  });
 });
